@@ -10,7 +10,14 @@ Shorts. Você revisa e aprova.
 
 A arquitetura completa está em [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md).
 
-## Como rodar
+## Como rodar no Windows (modo fácil)
+
+1. Baixe o projeto: no GitHub, botão verde **Code** → **Download ZIP**, e extraia a pasta.
+2. Clique duas vezes em **`instalar.bat`** (na primeira vez ele pode pedir para abrir de novo após instalar programas).
+3. Cole sua chave da Anthropic no Bloco de Notas que abrir, salve e feche.
+4. Clique duas vezes em **`iniciar.bat`**. O painel abre em http://localhost:8000.
+
+## Como rodar (desenvolvimento)
 
 Pré-requisitos: Python 3.11+, Node 20+ e FFmpeg (`ffmpeg` e `ffprobe` no PATH).
 
