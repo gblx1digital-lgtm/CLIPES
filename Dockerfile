@@ -16,6 +16,5 @@ COPY backend/ ./
 COPY --from=web /web/dist /app/frontend/dist
 COPY start.sh /app/start.sh
 ENV FRONTEND_DIST=/app/frontend/dist STORAGE_DIR=/data/storage DATABASE_URL=sqlite:////data/clipes.db PYTHONUNBUFFERED=1
-VOLUME ["/data"]
 EXPOSE 8000
 CMD ["/app/start.sh"]
