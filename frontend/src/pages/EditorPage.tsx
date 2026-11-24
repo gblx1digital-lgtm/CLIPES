@@ -220,8 +220,8 @@ function Editor({ clip }: { clip: ClipDetail }) {
               <div>
                 <p className="label">Duração do corte</p>
                 <div className="flex h-8 items-center gap-2">
-                  <span className={clsx("font-mono text-[15px] tabular-nums", end - start > 60 && "text-warn")}>{fmtTimecode(end - start)}</span>
-                  {end - start > 60 && <span className="text-2xs text-warn">acima de 60s</span>}
+                  <span className={clsx("font-mono text-[15px] tabular-nums", end - start > 120 && "text-warn")}>{fmtTimecode(end - start)}</span>
+                  {end - start > 120 && <span className="text-2xs text-warn">acima de 2 min</span>}
                   <button className="btn-ghost btn-sm ml-auto" onClick={() => { setStart(clip.start_s); setEnd(clip.end_s); }} title="Voltar à sugestão da IA">
                     <RotateCcw size={12} /> Sugestão da IA
                   </button>

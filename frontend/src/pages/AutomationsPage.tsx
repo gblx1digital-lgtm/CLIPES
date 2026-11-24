@@ -79,7 +79,7 @@ export default function AutomationsPage() {
             </Row>
             <Row>
               <Num label="Duração mínima (segundos)" value={f.min_clip_seconds} min={5} max={180} onChange={(v) => set("min_clip_seconds", v)} />
-              <Num label="Duração máxima (segundos)" value={f.max_clip_seconds} min={10} max={180} onChange={(v) => set("max_clip_seconds", v)} hint="TikTok/Reels/Shorts: 15 a 60s costuma reter melhor." />
+              <Num label="Duração máxima (segundos)" value={f.max_clip_seconds} min={10} max={180} onChange={(v) => set("max_clip_seconds", v)} hint="Até 180 segundos. Cortes de 1 a 2 min funcionam bem no TikTok e no Reels; o Shorts aceita até 3 min." />
             </Row>
             <Field label={`Pontuação viral mínima: ${f.min_viral_score}`} hint="Momentos abaixo desta nota são descartados.">
               <input type="range" className="w-full" min={0} max={100} value={f.min_viral_score} onChange={(e) => set("min_viral_score", Number(e.target.value))} />

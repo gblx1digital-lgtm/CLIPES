@@ -11,9 +11,9 @@ const PAGE_SIZE = 24;
 
 const DURATIONS: Record<string, [number | null, number | null]> = {
   "": [null, null],
-  short: [null, 20],
-  medium: [20, 45],
-  long: [45, null],
+  short: [null, 60],
+  medium: [60, 120],
+  long: [120, null],
 };
 const PERIODS: Record<string, number | null> = { "": null, "1": 1, "7": 7, "30": 30 };
 
@@ -112,9 +112,9 @@ export default function ClipsPage() {
           </Select>
           <Select className="w-full sm:w-auto sm:min-w-[150px]" value={get("duration")} onChange={(v) => set({ duration: v })}>
             <option value="">Qualquer duração</option>
-            <option value="short">Até 20s</option>
-            <option value="medium">20s a 45s</option>
-            <option value="long">Mais de 45s</option>
+            <option value="short">Até 1 min</option>
+            <option value="medium">1 a 2 min</option>
+            <option value="long">Mais de 2 min</option>
           </Select>
           <Select className="w-full sm:w-auto sm:min-w-[150px]" value={get("period")} onChange={(v) => set({ period: v })}>
             <option value="">Qualquer data</option>
