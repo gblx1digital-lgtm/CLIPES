@@ -74,6 +74,13 @@ class Creator(Base):
     # Layout padrão (webcam fixa costuma ficar no mesmo lugar em todas as lives)
     default_layout: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     notes: Mapped[str | None] = mapped_column(Text)
+    # Pasta do Google Drive onde o criador (ou você) coloca os arquivos autorizados
+    drive_folder_id: Mapped[str | None] = mapped_column(String(128))
+    # Estado de transmissão ao vivo (atualizado pelo monitoramento)
+    live_now: Mapped[bool | None] = mapped_column(Boolean, default=False)
+    live_title: Mapped[str | None] = mapped_column(String(500))
+    live_url: Mapped[str | None] = mapped_column(String(1000))
+    live_since: Mapped[datetime | None] = mapped_column(TZDateTime())
     last_checked_at: Mapped[datetime | None] = mapped_column(TZDateTime())
     last_check_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(TZDateTime(), default=utcnow)

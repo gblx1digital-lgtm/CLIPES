@@ -65,3 +65,19 @@ def list_recent(user_id: str, first: int = 20) -> list[DiscoveredVideo]:
             is_live_vod=v.get("type") == "archive",
         ))
     return out
+
+
+def live_stream(user_id: str) -> dict | None:
+    """Transmissão em andamento do canal (ou None)."""
+    with httpx.Client() as client:
+        data = _get(client, "streams", {"user_id": user_id})
+    items = data.get("data") or []
+    if not items:
+        return None
+    st = items[0]
+    return {
+        "title": st.get("title", ""),
+        "game": st.get("game_name", ""),
+        "started_at": datetime.fromisoformat(st["started_at"].replace("Z", "+00:00")) if st.get("started_at") else None,
+        "url": f"https://www.twitch.tv/{st.get('user_login', '')}",
+    }

@@ -29,6 +29,9 @@ export default function SettingsPage() {
             <Item ok={i?.twitch.configured} title="Twitch Helix API" env={["TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET"]}>
               Monitora VODs e destaques (apenas metadados). dev.twitch.tv/console → Register Your Application (OAuth Redirect: http://localhost) → Client ID e Secret.
             </Item>
+            <Item ok={i?.drive.configured} title="Google Drive API" env={["GOOGLE_API_KEY (opcional)"]}>
+              Importa automaticamente os vídeos de pastas compartilhadas pelos criadores. Use a mesma chave do YouTube: no Google Cloud, ative também a “Google Drive API” e inclua-a nas restrições da chave.
+            </Item>
             <Item ok={i?.transcription.available} title="Transcrição de fala (opcional)" env={["TRANSCRIPTION_PROVIDER=faster_whisper", "WHISPER_MODEL"]}
               detail={i?.transcription.detail} optional>
               Whisper local melhora a detecção de piadas e diálogos. Instale com <span className="font-mono text-fg">pip install -r backend/requirements-transcription.txt</span>. Sem ela, a IA usa quadros e sinais de áudio.

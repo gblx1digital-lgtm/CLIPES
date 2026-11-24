@@ -99,6 +99,12 @@ export type Creator = {
   last_checked_at: string | null;
   last_check_error: string | null;
   created_at: string;
+  drive_folder_id: string | null;
+  drive_folder_url: string | null;
+  live_now: boolean;
+  live_title: string | null;
+  live_url: string | null;
+  live_since: string | null;
   stats: { videos?: number; clips?: number; approved?: number; avg_score?: number; best_score?: number | null };
 };
 
@@ -106,7 +112,7 @@ export type Video = {
   id: number;
   creator_id: number;
   creator_name: string | null;
-  platform: "youtube" | "twitch" | "upload" | "url";
+  platform: "youtube" | "twitch" | "upload" | "url" | "drive";
   external_id: string;
   title: string;
   url: string | null;
@@ -246,6 +252,7 @@ export type Integrations = {
   ai: { configured: boolean; model: string; effort: string; env: string[] };
   youtube: { configured: boolean; env: string[] };
   twitch: { configured: boolean; env: string[] };
+  drive: { configured: boolean; env: string[] };
   ffmpeg: { configured: boolean };
   transcription: { provider: string; available: boolean; detail: string };
 };

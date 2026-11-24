@@ -17,7 +17,11 @@ def creator_out(c: Creator, stats: dict[str, Any] | None = None) -> dict[str, An
         "id": c.id, "name": c.name, "youtube_handle": c.youtube_handle, "youtube_channel_id": c.youtube_channel_id,
         "twitch_login": c.twitch_login, "twitch_user_id": c.twitch_user_id, "active": c.active,
         "media_authorized": c.media_authorized, "authorization_note": c.authorization_note,
-        "default_layout": c.default_layout, "notes": c.notes, "last_checked_at": _dt(c.last_checked_at),
+        "default_layout": c.default_layout, "notes": c.notes,
+        "drive_folder_id": c.drive_folder_id,
+        "drive_folder_url": f"https://drive.google.com/drive/folders/{c.drive_folder_id}" if c.drive_folder_id else None,
+        "live_now": bool(c.live_now), "live_title": c.live_title, "live_url": c.live_url,
+        "live_since": _dt(c.live_since), "last_checked_at": _dt(c.last_checked_at),
         "last_check_error": c.last_check_error, "created_at": _dt(c.created_at),
         "stats": stats or {},
     }

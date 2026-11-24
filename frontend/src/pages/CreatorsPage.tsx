@@ -15,12 +15,13 @@ type Form = {
   name: string;
   youtube_handle: string;
   twitch_login: string;
+  drive_folder: string;
   active: boolean;
   media_authorized: boolean;
   authorization_note: string;
   notes: string;
 };
-const EMPTY: Form = { name: "", youtube_handle: "", twitch_login: "", active: true, media_authorized: false, authorization_note: "", notes: "" };
+const EMPTY: Form = { name: "", youtube_handle: "", twitch_login: "", drive_folder: "", active: true, media_authorized: false, authorization_note: "", notes: "" };
 
 export default function CreatorsPage() {
   const qc = useQueryClient();
@@ -99,7 +100,10 @@ export default function CreatorsPage() {
                         <div className="flex items-center gap-2.5">
                           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-raised text-2xs font-semibold text-muted">{c.name.slice(0, 2).toUpperCase()}</div>
                           <div>
-                            <p className="text-[13px] font-medium">{c.name}</p>
+                            <p className="flex items-center gap-2 text-[13px] font-medium">
+                              {c.name}
+                              {c.live_now && <LiveBadge url={c.live_url} title={c.live_title} />}
+                            </p>
                             {c.default_layout?.cam && <p className="text-2xs text-faint">Layout de webcam salvo</p>}
                           </div>
                         </div>
@@ -108,7 +112,8 @@ export default function CreatorsPage() {
                         <div className="space-y-0.5">
                           {c.youtube_handle || c.youtube_channel_id ? <p>YouTube {c.youtube_handle ?? c.youtube_channel_id}</p> : null}
                           {c.twitch_login ? <p>Twitch {c.twitch_login}</p> : null}
-                          {!c.youtube_handle && !c.youtube_channel_id && !c.twitch_login && <p className="text-faint">Sem canal</p>}
+                          {c.drive_folder_url ? <p><a href={c.drive_folder_url} target="_blank" rel="noreferrer" className="hover:text-fg">Pasta do Drive</a></p> : null}
+                          {!c.youtube_handle && !c.youtube_channel_id && !c.twitch_login && !c.drive_folder_url && <p className="text-faint">Sem canal</p>}
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -132,7 +137,7 @@ export default function CreatorsPage() {
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-1">
                           <button className="btn-ghost btn-icon h-7 w-7" title="Verificar novos vídeos agora" disabled={!c.active} onClick={() => check.mutate(c.id)}><RefreshCw size={13} /></button>
-                          <button className="btn-ghost btn-icon h-7 w-7" title="Editar" onClick={() => setEditing({ id: c.id, form: { name: c.name, youtube_handle: c.youtube_handle ?? c.youtube_channel_id ?? "", twitch_login: c.twitch_login ?? "", active: c.active, media_authorized: c.media_authorized, authorization_note: c.authorization_note ?? "", notes: c.notes ?? "" } })}><Pencil size={13} /></button>
+                          <button className="btn-ghost btn-icon h-7 w-7" title="Editar" onClick={() => setEditing({ id: c.id, form: { name: c.name, youtube_handle: c.youtube_handle ?? c.youtube_channel_id ?? "", twitch_login: c.twitch_login ?? "", drive_folder: c.drive_folder_url ?? "", active: c.active, media_authorized: c.media_authorized, authorization_note: c.authorization_note ?? "", notes: c.notes ?? "" } })}><Pencil size={13} /></button>
                           <button className="btn-ghost btn-sm" onClick={() => toggleActive.mutate(c)}>{c.active ? "Pausar" : "Ativar"}</button>
                           <button className="btn-ghost btn-icon h-7 w-7 hover:text-bad" title="Excluir" onClick={() => confirm(`Excluir ${c.name}?`) && remove.mutate(c.id)}><Trash2 size={13} /></button>
                         </div>
@@ -162,6 +167,7 @@ function CreatorModal({ id, initial, onClose, onSaved }: { id?: number; initial:
         youtube_handle: yt && !(yt.startsWith("UC") && yt.length === 24) ? yt : null,
         youtube_channel_id: yt.startsWith("UC") && yt.length === 24 ? yt : null,
         twitch_login: f.twitch_login,
+        drive_folder: f.drive_folder,
         active: f.active,
         media_authorized: f.media_authorized,
         authorization_note: f.authorization_note,
@@ -184,6 +190,9 @@ function CreatorModal({ id, initial, onClose, onSaved }: { id?: number; initial:
           <Field label="YouTube" hint="@handle ou ID do canal (UC…)"><input className="input" value={f.youtube_handle} onChange={(e) => set("youtube_handle", e.target.value)} placeholder="@canal" /></Field>
           <Field label="Twitch" hint="Login do canal (twitch.tv/login)"><input className="input" value={f.twitch_login} onChange={(e) => set("twitch_login", e.target.value)} placeholder="login" /></Field>
         </div>
+        <Field label="Pasta do Google Drive (opcional)" hint="Link da pasta compartilhada (“Qualquer pessoa com o link”). Todo vídeo novo colocado nela é baixado e analisado sozinho. Exige o criador marcado como autorizado.">
+          <input className="input" value={f.drive_folder} onChange={(e) => set("drive_folder", e.target.value)} placeholder="https://drive.google.com/drive/folders/…" />
+        </Field>
         <div className="space-y-3 rounded-lg border hairline p-3">
           <Toggle
             checked={f.media_authorized}
@@ -201,4 +210,17 @@ function CreatorModal({ id, initial, onClose, onSaved }: { id?: number; initial:
       </div>
     </Modal>
   );
+}
+
+export function LiveBadge({ url, title }: { url: string | null; title: string | null }) {
+  const body = (
+    <span className="inline-flex h-5 items-center gap-1 rounded bg-bad/15 px-1.5 text-2xs font-semibold text-bad" title={title ?? "Ao vivo"}>
+      <span className="relative flex h-1.5 w-1.5">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-bad opacity-60" />
+        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-bad" />
+      </span>
+      AO VIVO
+    </span>
+  );
+  return url ? <a href={url} target="_blank" rel="noreferrer">{body}</a> : body;
 }

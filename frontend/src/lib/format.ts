@@ -71,6 +71,7 @@ export const PLATFORM_LABELS: Record<string, string> = {
   twitch: "Twitch",
   upload: "Upload",
   url: "Link direto",
+  drive: "Google Drive",
 };
 
 export const RIGHTS_LABELS: Record<string, string> = {

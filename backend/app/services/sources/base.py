@@ -24,6 +24,7 @@ class DiscoveredVideo:
     duration_s: float | None
     thumbnail_url: str | None
     is_live_vod: bool = False
+    live_now: bool = False  # transmissão acontecendo agora (não é VOD ainda)
 
 
 def _fold(text: str) -> str:

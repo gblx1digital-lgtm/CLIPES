@@ -52,7 +52,7 @@ export default function DiscoveryPage() {
   const retry = useMutation({ mutationFn: (id: number) => api.post(`/api/jobs/${id}/retry`), onSuccess: refresh, onError: onErr });
   const checkAll = useMutation({
     mutationFn: async () => {
-      const list = (creators ?? []).filter((c) => c.active && (c.youtube_handle || c.youtube_channel_id || c.twitch_login));
+      const list = (creators ?? []).filter((c) => c.active && (c.youtube_handle || c.youtube_channel_id || c.twitch_login || c.drive_folder_id));
       if (!list.length) throw new Error("Nenhum criador ativo com canal do YouTube ou Twitch cadastrado.");
       await Promise.all(list.map((c) => api.post(`/api/creators/${c.id}/check`)));
       return list.length;

@@ -12,6 +12,7 @@ from ..models import Clip, Creator, SourceVideo
 from ..queue import jobs as q
 from ..services import activity
 from ..services.layout import normalize_layout
+from ..services.sources.drive import parse_folder_id
 from .serializers import creator_out, job_out
 
 router = APIRouter(prefix="/api/creators", tags=["criadores"])
@@ -22,6 +23,7 @@ class CreatorIn(BaseModel):
     youtube_handle: str | None = None
     youtube_channel_id: str | None = None
     twitch_login: str | None = None
+    drive_folder: str | None = None
     active: bool = True
     media_authorized: bool = False
     authorization_note: str | None = None
@@ -33,6 +35,7 @@ class CreatorPatch(BaseModel):
     youtube_handle: str | None = None
     youtube_channel_id: str | None = None
     twitch_login: str | None = None
+    drive_folder: str | None = None
     active: bool | None = None
     media_authorized: bool | None = None
     authorization_note: str | None = None
@@ -70,7 +73,11 @@ def list_creators(db: Session = Depends(get_db)):
 def create_creator(body: CreatorIn, db: Session = Depends(get_db)):
     if db.scalar(select(Creator).where(func.lower(Creator.name) == body.name.strip().lower())):
         raise HTTPException(409, "Já existe um criador com esse nome.")
-    c = Creator(name=body.name.strip(), youtube_handle=_clean(body.youtube_handle),
+    try:
+        folder = parse_folder_id(body.drive_folder)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    c = Creator(name=body.name.strip(), youtube_handle=_clean(body.youtube_handle), drive_folder_id=folder,
                 youtube_channel_id=_clean(body.youtube_channel_id), twitch_login=_clean(body.twitch_login),
                 active=body.active, media_authorized=body.media_authorized,
                 authorization_note=_clean(body.authorization_note), notes=_clean(body.notes))
@@ -93,6 +100,11 @@ def update_creator(creator_id: int, body: CreatorPatch, db: Session = Depends(ge
         c.youtube_channel_id = None  # força nova resolução do canal
     if "twitch_login" in data and data["twitch_login"] != c.twitch_login:
         c.twitch_user_id = None
+    if "drive_folder" in data:
+        try:
+            c.drive_folder_id = parse_folder_id(data.pop("drive_folder"))
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
     if "default_layout" in data and data["default_layout"] is not None:
         data["default_layout"] = normalize_layout(data["default_layout"])
     for k, v in data.items():
@@ -117,7 +129,7 @@ def check_creator(creator_id: int, db: Session = Depends(get_db)):
     c = db.get(Creator, creator_id)
     if not c:
         raise HTTPException(404, "Criador não encontrado.")
-    if not (c.youtube_handle or c.youtube_channel_id or c.twitch_login):
-        raise HTTPException(400, "Cadastre um canal do YouTube ou da Twitch para monitorar este criador.")
+    if not (c.youtube_handle or c.youtube_channel_id or c.twitch_login or c.drive_folder_id):
+        raise HTTPException(400, "Cadastre um canal do YouTube, da Twitch ou uma pasta do Google Drive para este criador.")
     job = q.enqueue(db, "monitor_creator", {"creator_id": c.id}, ref_type="creator", ref_id=c.id, priority=40)
     return job_out(job)

@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowRight, CheckCircle2, Circle, Radar, Sparkles } from
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useDashboard } from "../components/AppShell";
+import { LiveBadge } from "./CreatorsPage";
 import { ClipCard } from "../components/ClipCard";
 import { ClipViewer } from "../components/ClipViewer";
 import { EmptyState, ErrorBox, PageHeader, ProgressBar, Section, Stat } from "../components/ui";
@@ -70,9 +71,9 @@ export default function DashboardPage() {
                   {data?.sources.map((c) => (
                     <div key={c.id} className="flex items-center gap-3 px-4 py-2.5 text-xs">
                       <span className={clsx("h-1.5 w-1.5 rounded-full", !c.active ? "bg-faint" : c.last_check_error ? "bg-warn" : c.last_checked_at ? "bg-good" : "bg-faint")} />
-                      <span className="w-40 truncate text-[13px] font-medium">{c.name}</span>
+                      <span className="flex w-48 items-center gap-2 truncate text-[13px] font-medium">{c.name}{c.live_now && <LiveBadge url={c.live_url} title={c.live_title} />}</span>
                       <span className="hidden truncate text-muted sm:block">
-                        {[c.youtube_handle && `YouTube ${c.youtube_handle}`, c.twitch_login && `Twitch ${c.twitch_login}`].filter(Boolean).join(" · ") || "Sem canal cadastrado"}
+                        {c.live_now && c.live_title ? c.live_title : [c.youtube_handle && `YouTube ${c.youtube_handle}`, c.twitch_login && `Twitch ${c.twitch_login}`, c.drive_folder_id && "Google Drive"].filter(Boolean).join(" · ") || "Sem canal cadastrado"}
                       </span>
                       <span className="ml-auto whitespace-nowrap text-faint">
                         {!c.active ? "Pausado" : c.last_checked_at ? `Verificado ${fmtRelative(c.last_checked_at)}` : "Nunca verificado"}

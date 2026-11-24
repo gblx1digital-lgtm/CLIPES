@@ -38,6 +38,7 @@ def integrations() -> dict[str, Any]:
                "env": ["ANTHROPIC_API_KEY"]},
         "youtube": {"configured": s.youtube_configured, "env": ["YOUTUBE_API_KEY"]},
         "twitch": {"configured": s.twitch_configured, "env": ["TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET"]},
+        "drive": {"configured": bool(s.drive_key), "env": ["GOOGLE_API_KEY (ou a mesma YOUTUBE_API_KEY)"]},
         "ffmpeg": {"configured": bool(s.ffmpeg_path and s.ffprobe_path)},
         "transcription": transcription.provider_status(),
     }

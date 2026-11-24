@@ -51,6 +51,8 @@ class Settings(BaseSettings):
 
     # Fontes oficiais
     youtube_api_key: str | None = None
+    # Chave Google para o Drive (se vazia, usa a mesma do YouTube; ative a "Google Drive API" nela)
+    google_api_key: str | None = None
     twitch_client_id: str | None = None
     twitch_client_secret: str | None = None
 
@@ -74,6 +76,10 @@ class Settings(BaseSettings):
     @property
     def youtube_configured(self) -> bool:
         return bool(self.youtube_api_key)
+
+    @property
+    def drive_key(self) -> str | None:
+        return self.google_api_key or self.youtube_api_key
 
     @property
     def twitch_configured(self) -> bool:

@@ -19,7 +19,7 @@ from ..services.ai_analysis import AIUnavailable, CandidateEvidence, analyze_can
 from ..services.candidates import find_candidates
 from ..services.settings_store import get_automation
 from ..services.signals import SignalSummary, audio_profile
-from ..services.sources import twitch, youtube
+from ..services.sources import drive, twitch, youtube
 from ..services.sources.base import SourceNotConfigured, matches_keywords
 
 log = logging.getLogger("clipes.worker")
@@ -44,6 +44,7 @@ def handle_monitor_creator(db: Session, job: Job) -> str:
     found: list = []
     errors: list[str] = []
     checked_any = False
+    live: dict | None = None
 
     if creator.youtube_handle or creator.youtube_channel_id:
         if not s.youtube_configured:
@@ -53,7 +54,11 @@ def handle_monitor_creator(db: Session, job: Job) -> str:
             try:
                 if not creator.youtube_channel_id:
                     creator.youtube_channel_id = youtube.resolve_channel(creator.youtube_handle)["channel_id"]
-                found += youtube.list_recent(creator.youtube_channel_id)
+                recent = youtube.list_recent(creator.youtube_channel_id)
+                for v in recent:
+                    if v.live_now and live is None:
+                        live = {"title": v.title, "url": v.url, "started_at": v.published_at}
+                found += [v for v in recent if not v.live_now]
             except Exception as e:  # noqa: BLE001
                 errors.append(f"YouTube: {e}")
     q.progress(db, job, 45, "YouTube verificado")
@@ -67,16 +72,33 @@ def handle_monitor_creator(db: Session, job: Job) -> str:
                 if not creator.twitch_user_id:
                     creator.twitch_user_id = twitch.resolve_user(creator.twitch_login)["user_id"]
                 found += twitch.list_recent(creator.twitch_user_id)
+                if live is None:
+                    live = twitch.live_stream(creator.twitch_user_id)
             except Exception as e:  # noqa: BLE001
                 errors.append(f"Twitch: {e}")
-    q.progress(db, job, 80, "Twitch verificada")
+    q.progress(db, job, 70, "Twitch verificada")
+
+    drive_new = 0
+    if creator.drive_folder_id:
+        if not s.drive_key:
+            errors.append("Google Drive: chave Google não configurada")
+        elif not creator.media_authorized:
+            errors.append("Google Drive: marque o criador como autorizado para importar a pasta")
+        else:
+            checked_any = True
+            try:
+                drive_new = _import_drive_folder(db, creator)
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"Google Drive: {e}")
+    q.progress(db, job, 85, "Google Drive verificado")
+    _update_live(db, creator, live)
 
     creator.last_checked_at = utcnow()
     creator.last_check_error = "; ".join(errors) or None
     db.commit()
 
     if not checked_any:
-        msg = "; ".join(errors) or "Criador sem canal do YouTube ou Twitch cadastrado."
+        msg = "; ".join(errors) or "Criador sem canal do YouTube, Twitch ou pasta do Google Drive cadastrados."
         raise PermanentError(msg)
 
     new = 0
@@ -97,9 +119,52 @@ def handle_monitor_creator(db: Session, job: Job) -> str:
                         ref_id=sv.id, commit=False)
     db.commit()
     summary = f"{creator.name}: {len(found)} vídeos verificados, {new} novos de GTA 6"
+    if creator.drive_folder_id:
+        summary += f", {drive_new} arquivos novos no Drive"
     activity.record(db, "monitor", summary + (f" (avisos: {'; '.join(errors)})" if errors else ""),
                     level="warning" if errors else "info", ref_type="creator", ref_id=creator.id)
     return summary
+
+
+def _update_live(db: Session, creator: Creator, live: dict | None) -> None:
+    was_live = bool(creator.live_now)
+    if live:
+        creator.live_now = True
+        creator.live_title = (live.get("title") or "")[:500]
+        creator.live_url = live.get("url")
+        if not was_live:
+            creator.live_since = live.get("started_at") or utcnow()
+            activity.record(db, "live", f"{creator.name} está AO VIVO: {creator.live_title[:120]}", level="success",
+                            ref_type="creator", ref_id=creator.id, commit=False)
+    elif was_live:
+        creator.live_now = False
+        activity.record(db, "live", f"{creator.name} encerrou a live. O VOD aparece na descoberta quando for publicado.",
+                        ref_type="creator", ref_id=creator.id, commit=False)
+    db.commit()
+
+
+def _import_drive_folder(db: Session, creator: Creator) -> int:
+    """Arquivos novos da pasta autorizada viram vídeos e entram direto na fila de ingestão."""
+    new = 0
+    for f in drive.list_videos(creator.drive_folder_id):
+        exists = db.scalar(select(SourceVideo.id).where(SourceVideo.platform == "drive", SourceVideo.external_id == f["id"]))
+        if exists:
+            continue
+        title = f["name"].rsplit(".", 1)[0][:500]
+        sv = SourceVideo(creator_id=creator.id, platform="drive", external_id=f["id"], title=title,
+                         url=drive.file_link(f["id"]), published_at=f["created_at"], duration_s=f["duration_s"],
+                         rights_basis="authorized",
+                         rights_note=f"Pasta do Google Drive autorizada. {creator.authorization_note or ''}".strip(),
+                         media_status="ingesting")
+        db.add(sv)
+        db.flush()
+        q.enqueue(db, "ingest_media", {"video_id": sv.id, "drive_file_id": f["id"]}, ref_type="video", ref_id=sv.id,
+                  priority=30, commit=False)
+        activity.record(db, "discovery", f"Novo arquivo no Drive de {creator.name}: {title[:120]}", ref_type="video",
+                        ref_id=sv.id, commit=False)
+        new += 1
+    db.commit()
+    return new
 
 
 # ============================================================== ingestão de mídia
@@ -114,7 +179,9 @@ def handle_ingest_media(db: Session, job: Job) -> str:
     db.commit()
     try:
         url = job.payload.get("url")
-        if url:
+        if job.payload.get("drive_file_id"):
+            path = _download_direct(db, job, video, drive.download_url(job.payload["drive_file_id"]))
+        elif url:
             path = _download_direct(db, job, video, url)
         else:
             path = storage.abs_path(video.media_path)
@@ -158,8 +225,22 @@ def _download_direct(db: Session, job: Job, video: SourceVideo, url: str) -> Pat
     if any(host == h or host.endswith("." + h) for h in BLOCKED_HOSTS):
         raise PermanentError("Download automático de páginas de plataformas não é permitido. "
                              "Envie o arquivo autorizado pelo upload ou use um link direto de arquivo.")
-    dst = storage.source_dir(video.id) / "source.mp4"
+    # Extensão neutra: depois do download o ffprobe decide e o arquivo é remuxado para MP4 (sem perda)
+    dst = storage.source_dir(video.id) / "source.download"
     tmp = dst.with_suffix(".part")
+    try:
+        _stream_to_file(db, job, url, tmp)
+    except httpx.HTTPError as e:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"Falha de rede no download ({type(e).__name__}).") from None
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+    tmp.replace(dst)
+    return dst
+
+
+def _stream_to_file(db: Session, job: Job, url: str, tmp: Path) -> None:
     with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(30, read=120)) as client:
         with client.stream("GET", url) as r:
             if r.status_code >= 400:
@@ -182,8 +263,6 @@ def _download_direct(db: Session, job: Job, video: SourceVideo, url: str) -> Pat
                             if q.is_cancelled(db, job):
                                 tmp.unlink(missing_ok=True)
                                 raise PermanentError("Cancelado.")
-    tmp.replace(dst)
-    return dst
 
 
 def _queue_analysis(db: Session, video: SourceVideo) -> None:
@@ -478,7 +557,7 @@ def due_monitors(db: Session) -> int:
     limit = utcnow() - timedelta(minutes=auto.monitor_interval_minutes)
     n = 0
     for c in db.scalars(select(Creator).where(Creator.active.is_(True))).all():
-        if not (c.youtube_handle or c.youtube_channel_id or c.twitch_login or c.twitch_user_id):
+        if not (c.youtube_handle or c.youtube_channel_id or c.twitch_login or c.twitch_user_id or c.drive_folder_id):
             continue
         if c.last_checked_at is None or c.last_checked_at < limit:
             before = db.scalar(select(func.count(Job.id)).where(Job.type == "monitor_creator", Job.ref_id == c.id,

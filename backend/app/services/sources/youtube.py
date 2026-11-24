@@ -72,8 +72,9 @@ def list_recent(channel_id: str, max_results: int = 25) -> list[DiscoveredVideo]
         if not v:
             continue
         sn = v["snippet"]
-        if sn.get("liveBroadcastContent") in ("live", "upcoming"):
-            continue  # ainda ao vivo: será pego quando virar VOD
+        if sn.get("liveBroadcastContent") == "upcoming":
+            continue
+        live_now = sn.get("liveBroadcastContent") == "live"
         thumbs = sn.get("thumbnails", {})
         thumb = (thumbs.get("maxres") or thumbs.get("high") or thumbs.get("medium") or {}).get("url")
         out.append(DiscoveredVideo(
@@ -84,6 +85,7 @@ def list_recent(channel_id: str, max_results: int = 25) -> list[DiscoveredVideo]
             published_at=datetime.fromisoformat(sn["publishedAt"].replace("Z", "+00:00")) if sn.get("publishedAt") else None,
             duration_s=parse_iso8601_duration(v.get("contentDetails", {}).get("duration")),
             thumbnail_url=thumb,
-            is_live_vod="liveStreamingDetails" in v,
+            is_live_vod="liveStreamingDetails" in v and not live_now,
+            live_now=live_now,
         ))
     return out
