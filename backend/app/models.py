@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, TypeDecorator, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -21,25 +21,21 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class TZDateTime(DateTime):
-    """DateTime que sempre devolve datetimes com timezone (SQLite perde o tz)."""
+class TZDateTime(TypeDecorator):
+    """DateTime sempre em UTC e com timezone (o SQLite perde o fuso ao gravar)."""
 
+    impl = DateTime(timezone=True)
     cache_ok = True
 
-    def __init__(self) -> None:
-        super().__init__(timezone=True)
+    def process_bind_param(self, value, dialect):  # noqa: ANN001
+        if isinstance(value, datetime):
+            value = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+        return value
 
-    def result_processor(self, dialect, coltype):  # noqa: ANN001
-        parent = super().result_processor(dialect, coltype)
-
-        def process(value):  # noqa: ANN001
-            if parent:
-                value = parent(value)
-            if isinstance(value, datetime) and value.tzinfo is None:
-                value = value.replace(tzinfo=timezone.utc)
-            return value
-
-        return process
+    def process_result_value(self, value, dialect):  # noqa: ANN001
+        if isinstance(value, datetime) and value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value
 
 
 # ---------------------------------------------------------------- enums (strings)
