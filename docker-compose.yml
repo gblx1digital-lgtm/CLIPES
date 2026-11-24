@@ -1,0 +1,39 @@
+# Produção simples: Postgres + API (serve o painel) + worker.
+#   cp .env.example .env   # preencha as chaves
+#   docker compose up -d --build
+#   abra http://localhost:8000
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: clipes
+      POSTGRES_USER: clipes
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-clipes}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clipes"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://clipes:${POSTGRES_PASSWORD:-clipes}@db:5432/clipes
+    volumes: [media:/data]
+    ports: ["8000:8000"]
+    depends_on: { db: { condition: service_healthy } }
+
+  worker:
+    build: .
+    command: ["python", "-m", "app.worker.main"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://clipes:${POSTGRES_PASSWORD:-clipes}@db:5432/clipes
+    volumes: [media:/data]
+    depends_on: { db: { condition: service_healthy } }
+    deploy: { replicas: 1 }  # aumente para processar vídeos em paralelo
+
+volumes:
+  pgdata:
+  media:

@@ -1,0 +1,2 @@
+# Opcional: transcrição local (Whisper via CTranslate2). Baixa o modelo na primeira execução.
+faster-whisper>=1.0

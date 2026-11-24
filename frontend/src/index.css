@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 8 9 10;
+  --panel: 14 15 17;
+  --raised: 21 22 25;
+  --hover: 28 29 33;
+  --line: 255 255 255;
+  --fg: 238 239 241;
+  --muted: 143 148 158;
+  --faint: 98 102 110;
+  --accent: 255 95 135;
+  --good: 74 222 128;
+  --warn: 251 191 36;
+  --bad: 248 113 113;
+  --info: 125 162 255;
+  color-scheme: dark;
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    font-size: 13px;
+    font-feature-settings: "cv11", "ss01", "ss03";
+    letter-spacing: -0.005em;
+  }
+  ::selection { background: rgb(var(--accent) / 0.3); }
+  * { scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / 0.1) transparent; }
+  input[type="range"] { accent-color: rgb(var(--accent)); }
+  :focus-visible { outline: 2px solid rgb(var(--accent) / 0.6); outline-offset: 1px; }
+}
+
+@layer components {
+  .card { @apply rounded-lg border border-line/[0.07] bg-panel; }
+  .hairline { @apply border-line/[0.07]; }
+  .btn {
+    @apply inline-flex h-8 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 text-[13px] font-medium
+      transition-colors duration-100 disabled:pointer-events-none disabled:opacity-40;
+  }
+  .btn-primary { @apply btn bg-fg text-bg hover:bg-white; }
+  .btn-accent { @apply btn bg-accent text-white hover:bg-accent/90; }
+  .btn-secondary { @apply btn border border-line/[0.09] bg-raised text-fg hover:bg-hover; }
+  .btn-ghost { @apply btn text-muted hover:bg-hover hover:text-fg; }
+  .btn-danger { @apply btn border border-bad/20 bg-bad/10 text-bad hover:bg-bad/20; }
+  .btn-sm { @apply h-7 px-2.5 text-xs; }
+  .btn-icon { @apply h-8 w-8 px-0; }
+  .input {
+    @apply h-8 w-full rounded-md border border-line/[0.09] bg-bg px-2.5 text-[13px] text-fg placeholder:text-faint
+      transition-colors hover:border-line/[0.14] focus:border-accent/50 focus:outline-none;
+  }
+  .label { @apply mb-1.5 block text-xs font-medium text-muted; }
+  .kbd { @apply rounded border border-line/10 bg-raised px-1 font-mono text-2xs text-muted; }
+  .skeleton {
+    @apply rounded-md;
+    background: linear-gradient(90deg, rgb(255 255 255 / 0.03), rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.03));
+    background-size: 200% 100%;
+    animation: shimmer 1.6s linear infinite;
+  }
+}
