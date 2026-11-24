@@ -14,7 +14,8 @@ COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./
 COPY --from=web /web/dist /app/frontend/dist
-ENV FRONTEND_DIST=/app/frontend/dist STORAGE_DIR=/data/storage PYTHONUNBUFFERED=1
+COPY start.sh /app/start.sh
+ENV FRONTEND_DIST=/app/frontend/dist STORAGE_DIR=/data/storage DATABASE_URL=sqlite:////data/clipes.db PYTHONUNBUFFERED=1
 VOLUME ["/data"]
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/start.sh"]

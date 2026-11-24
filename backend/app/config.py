@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     log_level: str = "INFO"
 
+    # Acesso ao painel quando publicado na internet (vazio = sem senha, só para uso local)
+    app_user: str = "admin"
+    app_password: str | None = None
+
     # Upload
     max_upload_mb: int = 8192
 

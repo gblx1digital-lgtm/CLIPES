@@ -10,6 +10,16 @@ Shorts. Você revisa e aprova.
 
 A arquitetura completa está em [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md).
 
+## Colocar no ar (Railway, a partir do GitHub)
+
+1. Entre em railway.com com sua conta do GitHub e assine o plano Hobby.
+2. **New Project → Deploy from GitHub repo →** escolha este repositório. O `Dockerfile` e o `railway.json` já configuram tudo.
+3. No serviço, **Volume → Mount path `/data`** (guarda banco, vídeos e exportações).
+4. **Variables:** `APP_PASSWORD` (senha do painel) e `ANTHROPIC_API_KEY`. Opcionais: `YOUTUBE_API_KEY`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`.
+5. **Settings → Networking → Generate Domain.** Abra o link; usuário `admin` e a senha definida.
+
+Cada push no `main` publica a nova versão automaticamente.
+
 ## Como rodar no Windows (modo fácil)
 
 1. Baixe o projeto: no GitHub, botão verde **Code** → **Download ZIP**, e extraia a pasta.

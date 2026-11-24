@@ -1,7 +1,9 @@
 """API HTTP. Não faz processamento pesado: tudo vai para a fila (worker)."""
 from __future__ import annotations
 
+import base64
 import logging
+import secrets
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +27,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def basic_auth(request: Request, call_next):
+    """Senha única para o painel inteiro (navegador pede usuário e senha)."""
+    if settings.app_password and request.url.path != "/api/health":
+        ok = False
+        header = request.headers.get("authorization", "")
+        if header.lower().startswith("basic "):
+            try:
+                user, _, pwd = base64.b64decode(header[6:]).decode("utf-8").partition(":")
+                ok = secrets.compare_digest(user, settings.app_user) and secrets.compare_digest(pwd, settings.app_password)
+            except Exception:  # noqa: BLE001
+                ok = False
+        if not ok:
+            return JSONResponse(status_code=401, content={"detail": "Acesso restrito."},
+                                headers={"WWW-Authenticate": 'Basic realm="Clipes", charset="UTF-8"'})
+    return await call_next(request)
+
 
 for r in (creators.router, videos.router, clips.router, operations.router):
     app.include_router(r)
