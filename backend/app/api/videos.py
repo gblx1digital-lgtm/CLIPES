@@ -67,16 +67,20 @@ async def _save_upload(file: UploadFile, dst_dir: Path) -> Path:
     limit = get_settings().max_upload_mb * 1024 * 1024
     tmp = storage.root() / "uploads_tmp" / f"{uuid.uuid4().hex}{ext}"
     size = 0
-    with open(tmp, "wb") as f:
-        while chunk := await file.read(4 * 1024 * 1024):
-            size += len(chunk)
-            if size > limit:
-                f.close()
-                tmp.unlink(missing_ok=True)
-                raise HTTPException(413, f"Arquivo maior que o limite de {get_settings().max_upload_mb} MB.")
-            f.write(chunk)
-    dst = dst_dir / f"source{ext}"
-    shutil.move(str(tmp), dst)
+    try:
+        with open(tmp, "wb") as f:
+            while chunk := await file.read(4 * 1024 * 1024):
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(413, f"Arquivo maior que o limite de {get_settings().max_upload_mb} MB.")
+                f.write(chunk)
+        dst = dst_dir / f"source{ext}"
+        shutil.move(str(tmp), dst)
+    except BaseException:
+        tmp.unlink(missing_ok=True)  # envio interrompido ou disco cheio: não deixa lixo ocupando o volume
+        raise
+    finally:
+        await file.close()
     return dst
 
 
