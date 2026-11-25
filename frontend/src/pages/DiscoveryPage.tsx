@@ -250,7 +250,11 @@ function JobRow({ j, onCancel, onRetry }: { j: Job; onCancel: () => void; onRetr
       <p className="truncate text-2xs text-faint">
         {j.status === "running" ? j.message : j.status === "failed" ? (j.error ?? "").split("\n")[0] : j.message} · {fmtRelative(j.finished_at ?? j.started_at ?? j.created_at)}
       </p>
-      {j.status === "failed" && j.error && (
+      {/* Falhou e vai tentar de novo: mostra o motivo já, sem esperar a última tentativa */}
+      {j.status === "queued" && j.error && (
+        <p className="truncate text-2xs text-bad/90" title={j.error}>{j.error.split("\n")[0]}</p>
+      )}
+      {(j.status === "failed" || j.status === "queued") && j.error && (
         <>
           <button className="text-2xs text-muted hover:text-fg" onClick={() => setOpen(!open)}>{open ? "Ocultar detalhes" : "Ver detalhes do erro"}</button>
           {open && <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-bg p-2 font-mono text-2xs text-bad/90">{j.error}</pre>}

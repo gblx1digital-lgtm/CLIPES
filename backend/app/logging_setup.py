@@ -2,8 +2,23 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import re
 
 from .config import REPO_DIR, get_settings
+
+# Chaves que aparecem em mensagens de erro (cabeçalho rejeitado pela biblioteca HTTP, URL com ?key=...)
+_SECRETS = [
+    (re.compile(r"sk-ant-[A-Za-z0-9_\-]+"), "sk-ant-***"),
+    (re.compile(r"AIza[0-9A-Za-z_\-]{20,}"), "AIza***"),
+    (re.compile(r"([?&](?:key|client_secret|access_token)=)[^&\s'\"]+"), r"\1***"),
+]
+
+
+def redact_secrets(text: str) -> str:
+    """Esconde chaves de API em textos que vão para o painel, o banco ou o log (prints de erro são compartilhados)."""
+    for pattern, repl in _SECRETS:
+        text = pattern.sub(repl, text)
+    return text
 
 
 def setup_logging(component: str) -> None:

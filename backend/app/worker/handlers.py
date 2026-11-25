@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
+from ..logging_setup import redact_secrets
 from ..models import Clip, Creator, Export, Job, SourceVideo, utcnow
 from ..queue import jobs as q
 from ..services import activity, layout as layout_svc, media, render, scoring, storage, transcription
@@ -94,7 +95,7 @@ def handle_monitor_creator(db: Session, job: Job) -> str:
     _update_live(db, creator, live)
 
     creator.last_checked_at = utcnow()
-    creator.last_check_error = "; ".join(errors) or None
+    creator.last_check_error = redact_secrets("; ".join(errors)) or None
     db.commit()
 
     if not checked_any:
@@ -196,7 +197,7 @@ def handle_ingest_media(db: Session, job: Job) -> str:
             info = media.probe(path)
     except Exception as e:
         video.media_status = "failed"
-        video.media_error = str(e)[:2000]
+        video.media_error = redact_secrets(str(e))[:2000]
         db.commit()
         raise
     video.media_path = storage.rel_path(path)
@@ -291,7 +292,7 @@ def handle_analyze_video(db: Session, job: Job, *, ai_caller=None) -> str:
         result = _analyze(db, job, video, src, auto, creator, ai_caller)
     except Exception as e:
         video.analysis_status = "failed"
-        video.analysis_error = str(e)[:2000]
+        video.analysis_error = redact_secrets(str(e))[:2000]
         db.commit()
         activity.record(db, "analysis", f"Análise falhou em “{video.title[:80]}”: {str(e)[:200]}", level="error",
                         ref_type="video", ref_id=video.id)
@@ -343,7 +344,7 @@ def _analyze(db, job, video, src, auto, creator, ai_caller) -> str:  # noqa: ANN
     cands = find_candidates(signals, duration, min_len=auto.min_clip_seconds, max_len=auto.max_clip_seconds, limit=limit)
     meta["candidates"] = [{"start_s": c.start_s, "end_s": c.end_s, "peak_s": c.peak_s, "signal_score": c.signal_score,
                            **c.features} for c in cands]
-    video.analysis_meta = meta
+    video.analysis_meta = dict(meta)  # cópia: o mesmo dict reatribuído não é salvo
     db.commit()
     if not cands:
         video.analysis_status = "done"
@@ -375,6 +376,7 @@ def _analyze(db, job, video, src, auto, creator, ai_caller) -> str:  # noqa: ANN
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     decisions = []
+    failures: list[Exception] = []
     batch = max(1, s.ai_max_candidates_per_request)
     chunks = [evidences[b:b + batch] for b in range(0, len(evidences), batch)]
     q.progress(db, job, 56, f"IA avaliando {len(evidences)} momentos")
@@ -382,12 +384,30 @@ def _analyze(db, job, video, src, auto, creator, ai_caller) -> str:  # noqa: ANN
         futures = [pool.submit(analyze_candidates, video_meta, chunk, min_len=auto.min_clip_seconds,
                                max_len=auto.max_clip_seconds, duration=duration, caller=ai_caller) for chunk in chunks]
         for done, fut in enumerate(as_completed(futures), 1):
-            decisions += fut.result()
+            try:
+                decisions += fut.result()
+            except AIUnavailable:
+                # Chave, modelo ou requisição inválidos: os outros lotes falhariam do mesmo jeito
+                for f in futures:
+                    f.cancel()
+                raise
+            except Exception as e:  # noqa: BLE001
+                # Um lote com problema (rede, recusa, resposta truncada) não descarta o que os outros acharam
+                log.warning("Lote da IA falhou no vídeo %s: %s", video.id, e)
+                failures.append(e)
             q.progress(db, job, 56 + 34 * done / len(chunks), f"IA avaliou {done} de {len(chunks)} lotes")
             if q.is_cancelled(db, job):
                 for f in futures:
                     f.cancel()
                 raise PermanentError("Cancelado.")
+    if failures:
+        meta["ai_failed_batches"] = len(failures)
+        if not decisions:
+            raise failures[0]
+        activity.record(db, "analysis",
+                        f"IA falhou em {len(failures)} de {len(chunks)} lotes de “{video.title[:60]}” "
+                        f"({str(failures[0])[:150]}); cortes criados com os demais. Reanalise para tentar de novo.",
+                        level="warning", ref_type="video", ref_id=video.id)
 
     q.progress(db, job, 92, "Pontuando e organizando cortes")
     created = _create_clips(db, video, creator, cands, decisions, auto, info, src, detected)
@@ -395,14 +415,18 @@ def _analyze(db, job, video, src, auto, creator, ai_caller) -> str:  # noqa: ANN
     meta["ai_kept"] = sum(1 for d in decisions if d.keep)
     meta["ai_evaluated"] = len(decisions)
     meta["finished_at"] = utcnow().isoformat()
-    video.analysis_meta = meta
+    video.analysis_meta = dict(meta)  # cópia: o mesmo dict reatribuído não é salvo
     video.analysis_status = "done"
     video.analyzed_at = utcnow()
     db.commit()
+    why = ""
+    if created == 0:
+        why = (" (a IA não aprovou nenhum momento)" if meta["ai_kept"] == 0 else
+               f" (nenhum momento aprovado atingiu a nota mínima de {auto.min_viral_score} ou o limite diário de cortes)")
     activity.record(db, "analysis",
-                    f"IA analisou “{video.title[:80]}”: {len(cands)} candidatos, {created} cortes criados",
-                    level="success", ref_type="video", ref_id=video.id)
-    return f"{created} cortes criados de {len(cands)} candidatos"
+                    f"IA analisou “{video.title[:80]}”: {len(cands)} candidatos, {created} cortes criados{why}",
+                    level="success" if created else "warning", ref_type="video", ref_id=video.id)
+    return f"{created} cortes criados de {len(cands)} candidatos{why}"
 
 
 def _scene_changes(db, job, src, duration, profile, auto, limit, meta) -> list[float]:  # noqa: ANN001
@@ -540,7 +564,7 @@ def handle_render_export(db: Session, job: Job) -> str:
         out = media.probe(dst)
     except Exception as e:
         exp.status = "failed"
-        exp.error = str(e)[:2000]
+        exp.error = redact_secrets(str(e))[:2000]
         clip.render_status = "failed"
         db.commit()
         activity.record(db, "export", f"Exportação falhou: {clip.title[:80]} — {str(e)[:150]}", level="error",

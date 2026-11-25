@@ -140,6 +140,46 @@ def test_full_pipeline(client, test_video, monkeypatch):
     assert r.status_code == 206 and len(r.content) == 1024
 
 
+
+def test_failed_ai_batch_keeps_clips_from_other_batches(client, test_video, monkeypatch):
+    """Se um lote da IA falha (rede, recusa), os cortes que os outros lotes acharam não são descartados."""
+    from app.config import get_settings
+    from app.services.ai_analysis import AIError
+
+    r = client.post("/api/creators", json={"name": "Criador Lotes", "media_authorized": True})
+    creator_id = r.json()["id"]
+    with open(test_video, "rb") as f:
+        r = client.post("/api/videos/upload",
+                        data={"creator_id": creator_id, "rights_basis": "own", "confirm_rights": "true", "title": "Live lotes"},
+                        files={"file": ("lotes.mp4", f, "video/mp4")})
+    video_id = r.json()["video"]["id"]
+
+    def flaky(content):
+        text = "\n".join(b["text"] for b in content if b["type"] == "text")
+        if "=== Candidato 0 ===" in text:
+            raise AIError("Falha de conexão com a API Anthropic (ReadError).")
+        return fake_claude(content)
+
+    monkeypatch.setattr(get_settings(), "ai_max_candidates_per_request", 1)  # um candidato por lote
+    monkeypatch.setattr(ai_analysis, "_call_claude", flaky)
+    _drain()
+    v = client.get(f"/api/videos/{video_id}").json()
+    assert v["analysis_status"] == "done", v["analysis_error"]
+    assert v["analysis_meta"]["ai_failed_batches"] == 1
+    assert client.get("/api/clips", params={"creator_id": creator_id}).json()["total"] >= 1
+    d = client.get("/api/dashboard").json()
+    assert any("lotes" in a["message"] and a["level"] == "warning" for a in d["activity"])
+
+    # Todos os lotes falhando: a análise falha com o motivo real (e tenta de novo depois)
+    def down(content):
+        raise AIError("Falha de conexão com a API Anthropic (ConnectError).")
+
+    monkeypatch.setattr(ai_analysis, "_call_claude", down)
+    assert client.post(f"/api/videos/{video_id}/analyze").status_code == 200
+    worker.run_one("test-worker")
+    v = client.get(f"/api/videos/{video_id}").json()
+    assert v["analysis_status"] == "queued" and "ConnectError" in v["analysis_error"]
+
 def test_automation_validation(client):
     r = client.put("/api/automation", json={"min_clip_seconds": 70, "max_clip_seconds": 60})
     assert r.status_code == 422

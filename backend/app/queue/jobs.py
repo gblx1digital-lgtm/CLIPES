@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from ..logging_setup import redact_secrets
 from ..models import Job, utcnow
 
 JOB_TYPES = {"monitor_creator", "ingest_media", "analyze_video", "render_export"}
@@ -104,6 +105,7 @@ def succeed(db: Session, job: Job, message: str = "Concluído") -> None:
 
 def fail(db: Session, job: Job, error: str, *, retryable: bool = True) -> bool:
     """Marca falha. Retorna True se o job voltou para a fila (nova tentativa)."""
+    error = redact_secrets(error)
     # Guarda início e fim: a causa raiz costuma estar no começo do traceback encadeado
     job.error = error if len(error) <= 6000 else error[:2500] + "\n[...]\n" + error[-3500:]
     job.finished_at = utcnow()

@@ -124,3 +124,15 @@ def test_claude_call_omits_fallbacks_for_models_without_support(monkeypatch):
     monkeypatch.setattr(s, "ai_model", "claude-opus-5-5")
     ai_analysis._call_claude([{"type": "text", "text": "x"}])
     assert calls["beta"]["fallbacks"] == "default"
+
+
+def test_redact_secrets_hides_api_keys():
+    from app.logging_setup import redact_secrets
+
+    text = ("Falha de conexão com a API Anthropic (LocalProtocolError: Illegal header value "
+            "b'Bearer sk-ant-api03-AbC_dEf-123\\n'). url 'https://www.googleapis.com/youtube/v3/search"
+            "?part=snippet&key=AIzaSyA1234567890abcdefghijklmnopqrstu&maxResults=5'")
+    out = redact_secrets(text)
+    assert "sk-ant-api03" not in out and "AbC_dEf" not in out
+    assert "AIzaSyA123" not in out and "key=***" in out
+    assert out.startswith("Falha de conexão com a API Anthropic")
