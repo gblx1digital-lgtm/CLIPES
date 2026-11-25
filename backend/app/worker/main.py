@@ -64,7 +64,7 @@ def run_one(worker_id: str) -> bool:
             if q.is_cancelled(db, job):
                 return True
             log.exception("Job #%s falhou", job.id)
-            requeued = q.fail(db, job, f"{e}\n\n{traceback.format_exc()[-2500:]}", retryable=True)
+            requeued = q.fail(db, job, f"{e}\n\n{traceback.format_exc()}", retryable=True)
             if requeued:
                 on_requeue(db, job)
             else:

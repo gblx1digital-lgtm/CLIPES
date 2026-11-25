@@ -104,7 +104,8 @@ def succeed(db: Session, job: Job, message: str = "Concluído") -> None:
 
 def fail(db: Session, job: Job, error: str, *, retryable: bool = True) -> bool:
     """Marca falha. Retorna True se o job voltou para a fila (nova tentativa)."""
-    job.error = error[-4000:]
+    # Guarda início e fim: a causa raiz costuma estar no começo do traceback encadeado
+    job.error = error if len(error) <= 6000 else error[:2500] + "\n[...]\n" + error[-3500:]
     job.finished_at = utcnow()
     if retryable and job.attempts < job.max_attempts:
         job.status = "queued"

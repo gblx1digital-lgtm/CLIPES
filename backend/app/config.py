@@ -9,6 +9,7 @@ import shutil
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -60,6 +61,16 @@ class Settings(BaseSettings):
     worker_poll_seconds: float = 2.0
     # Job 'running' sem heartbeat por N minutos (worker morreu) volta para a fila
     job_stale_minutes: int = 10
+
+    @field_validator("anthropic_api_key", "youtube_api_key", "google_api_key", "twitch_client_id",
+                     "twitch_client_secret", "app_password", "ai_model", "ai_effort", mode="before")
+    @classmethod
+    def _strip(cls, v):  # noqa: ANN001
+        """Remove espaços, quebras de linha e aspas que costumam vir junto ao colar chaves no painel."""
+        if isinstance(v, str):
+            v = v.strip().strip('"').strip("'").strip()
+            return v or None if v == "" else v
+        return v
 
     @property
     def ffmpeg_path(self) -> str | None:
