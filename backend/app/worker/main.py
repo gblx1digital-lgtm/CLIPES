@@ -22,7 +22,7 @@ from sqlalchemy import update
 from ..models import Job, utcnow
 from ..services import activity
 from ..services.settings_store import set_value
-from .handlers import HANDLERS, NON_RETRYABLE, due_monitors, on_requeue
+from .handlers import HANDLERS, NON_RETRYABLE, due_monitors, on_requeue, reconcile_orphans
 
 log = logging.getLogger("clipes.worker")
 
@@ -120,6 +120,9 @@ def main() -> None:
                     rec = q.recover_stale(db, s.job_stale_minutes)
                     if rec:
                         log.warning("%s jobs recuperados de workers parados", rec)
+                    fixed = reconcile_orphans(db)
+                    if fixed:
+                        log.warning("%s itens destravados (sem job ativo)", fixed)
             except Exception:  # noqa: BLE001
                 log.exception("Falha no agendador")
             finally:

@@ -118,9 +118,9 @@ async def upload_video(
     video.rights_note = rights_note.strip() or None
     video.media_path = storage.rel_path(path)
     video.media_status = "ingesting"
-    db.commit()
+    job = q.enqueue(db, "ingest_media", {"video_id": video.id}, ref_type="video", ref_id=video.id, priority=30, commit=False)
+    db.commit()  # status e job na mesma transação
     activity.record(db, "ingest", f"Mídia enviada para “{video.title[:100]}” ({rights_basis})", ref_type="video", ref_id=video.id)
-    job = q.enqueue(db, "ingest_media", {"video_id": video.id}, ref_type="video", ref_id=video.id, priority=30)
     return {"video": video_out(video), "job": job_out(job)}
 
 
@@ -156,8 +156,9 @@ def video_from_url(body: FromUrlIn, db: Session = Depends(get_db)):
     video.rights_basis = body.rights_basis
     video.rights_note = body.rights_note.strip() or None
     video.media_status = "ingesting"
+    job = q.enqueue(db, "ingest_media", {"video_id": video.id, "url": url}, ref_type="video", ref_id=video.id, priority=30,
+                    commit=False)
     db.commit()
-    job = q.enqueue(db, "ingest_media", {"video_id": video.id, "url": url}, ref_type="video", ref_id=video.id, priority=30)
     return {"video": video_out(video), "job": job_out(job)}
 
 

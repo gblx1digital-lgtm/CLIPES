@@ -164,3 +164,20 @@ def test_monitor_without_keys_fails_clearly(client):
     _drain()
     j = next(x for x in client.get("/api/jobs").json() if x["id"] == job["id"])
     assert j["status"] == "failed" and "YOUTUBE_API_KEY" in j["error"]
+
+
+def test_orphaned_progress_is_unstuck(client):
+    from app.models import Creator, SourceVideo
+    from app.worker.handlers import reconcile_orphans
+
+    with SessionLocal() as db:
+        c = Creator(name="Órfão")
+        db.add(c)
+        db.flush()
+        v = SourceVideo(creator_id=c.id, platform="upload", external_id="orfao", title="x",
+                        media_status="ready", analysis_status="running")
+        db.add(v)
+        db.commit()
+        assert reconcile_orphans(db) >= 1
+        db.refresh(v)
+        assert v.analysis_status == "failed" and "Reanalisar" in v.analysis_error

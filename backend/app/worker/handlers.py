@@ -577,6 +577,29 @@ def on_requeue(db: Session, job: Job) -> None:
     db.commit()
 
 
+def reconcile_orphans(db: Session) -> int:
+    """Destrava vídeos/exportações que ficaram 'em andamento' sem nenhum job ativo
+    (ex.: o servidor reiniciou no meio do processamento)."""
+    active = {(j.type, j.ref_id) for j in db.scalars(select(Job).where(Job.status.in_(q.ACTIVE_STATUSES))).all()}
+    msg = "Interrompido porque o servidor reiniciou. Clique em Reanalisar."
+    n = 0
+    for v in db.scalars(select(SourceVideo).where(SourceVideo.analysis_status.in_(("queued", "running")))).all():
+        if ("analyze_video", v.id) not in active:
+            v.analysis_status, v.analysis_error = "failed", msg
+            n += 1
+    for v in db.scalars(select(SourceVideo).where(SourceVideo.media_status == "ingesting")).all():
+        if ("ingest_media", v.id) not in active:
+            v.media_status, v.media_error = "failed", "Preparação interrompida (servidor reiniciou). Envie a mídia de novo."
+            n += 1
+    for e in db.scalars(select(Export).where(Export.status.in_(("queued", "rendering")))).all():
+        if ("render_export", e.id) not in active:
+            e.status, e.error = "failed", "Interrompido (servidor reiniciou). Tente exportar de novo."
+            e.clip.render_status = "failed"
+            n += 1
+    db.commit()
+    return n
+
+
 HANDLERS = {
     "monitor_creator": handle_monitor_creator,
     "ingest_media": handle_ingest_media,
