@@ -53,7 +53,11 @@ for r in (creators.router, videos.router, clips.router, operations.router):
 @app.exception_handler(Exception)
 async def unhandled(request: Request, exc: Exception):
     log.exception("Erro não tratado em %s %s", request.method, request.url.path)
-    return JSONResponse(status_code=500, content={"detail": "Erro interno. Veja data/logs/api.log."})
+    msg = str(exc).strip().splitlines()[0][:200] if str(exc).strip() else ""
+    if isinstance(exc, OSError) and getattr(exc, "errno", None) == 28:
+        msg = "Sem espaço em disco no servidor. Aumente o volume no Railway ou apague vídeos antigos."
+    return JSONResponse(status_code=500, content={"detail": f"Erro interno ({type(exc).__name__}): {msg}" if msg
+                                                  else f"Erro interno ({type(exc).__name__})."})
 
 
 @app.get("/api/health")
