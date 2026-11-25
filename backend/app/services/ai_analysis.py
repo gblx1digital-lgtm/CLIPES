@@ -181,8 +181,12 @@ def _call_claude(content: list[dict]) -> dict[str, Any]:
         raise AIError("Limite de requisições da API atingido; o job será reprocessado.") from e
     except anthropic.APIStatusError as e:
         raise AIError(f"Erro da API Anthropic ({e.status_code}): {e.message}") from e
+    except anthropic.APITimeoutError as e:
+        raise AIError("A API Anthropic demorou demais para responder (timeout).") from e
     except anthropic.APIConnectionError as e:
-        raise AIError("Falha de conexão com a API Anthropic.") from e
+        cause = e.__cause__ or e.__context__
+        detail = f"{type(cause).__name__}: {cause}"[:300] if cause else str(e)
+        raise AIError(f"Falha de conexão com a API Anthropic ({detail}).") from e
 
     if response.stop_reason == "refusal":
         raise AIError("A IA recusou analisar este trecho.")
