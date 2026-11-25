@@ -91,16 +91,59 @@ def extract_audio_wav(src: str | Path, dst: str | Path, sample_rate: int = 16000
     return Path(dst)
 
 
-def detect_scene_changes(src: str | Path, threshold: float = 0.35, analysis_height: int = 180) -> list[float]:
-    """Timestamps (s) de mudanças bruscas de cena. Reduz a resolução para ser rápido."""
-    proc = subprocess.run(
-        [_bin("ffmpeg"), "-v", "info", "-i", str(src), "-an",
-         "-vf", f"scale=-2:{analysis_height},select='gt(scene,{threshold})',showinfo", "-f", "null", "-"],
-        capture_output=True, text=True,
-    )
+def detect_scene_changes(
+    src: str | Path,
+    threshold: float = 0.35,
+    analysis_height: int = 180,
+    *,
+    start: float = 0.0,
+    duration: float | None = None,
+    on_progress=None,  # noqa: ANN001  callable(fração 0-1)
+) -> list[float]:
+    """Timestamps absolutos (s) de mudanças bruscas de cena, no vídeo todo ou só em [start, start+duration].
+
+    Para ser rápido: decodifica só os quadros-chave (15-20x mais rápido, mesmas cenas detectadas) em baixa resolução.
+    """
+    cmd = [_bin("ffmpeg"), "-v", "info", "-nostdin", "-skip_frame", "nokey"]
+    if start > 0:
+        cmd += ["-ss", f"{start:.3f}"]
+    cmd += ["-i", str(src)]
+    if duration:
+        cmd += ["-t", f"{duration:.3f}"]
+    cmd += ["-an", "-vf", f"scale=-2:{analysis_height},select='gt(scene,{threshold})',showinfo",
+            "-progress", "pipe:2", "-nostats", "-f", "null", "-"]
+    proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
+    assert proc.stderr is not None
+    times: list[float] = []
+    tail: list[str] = []
+    last = -1.0
+    for line in proc.stderr:
+        m = re.search(r"pts_time:([0-9.]+)", line)
+        if m:
+            times.append(start + float(m.group(1)))
+        elif line.startswith("out_time_us=") and on_progress and duration:
+            try:
+                frac = min(1.0, int(line.split("=", 1)[1]) / 1e6 / duration)
+            except ValueError:
+                continue
+            if frac - last >= 0.02:
+                last = frac
+                on_progress(frac)
+        tail = (tail + [line])[-10:]
+    proc.wait()
     if proc.returncode != 0:
-        raise MediaError("Falha na detecção de cenas:\n" + "\n".join(proc.stderr.splitlines()[-10:]))
-    return [float(m.group(1)) for m in re.finditer(r"pts_time:([0-9.]+)", proc.stderr)]
+        raise MediaError("Falha na detecção de cenas:\n" + "".join(tail))
+    return times
+
+
+def merge_windows(windows: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    out: list[tuple[float, float]] = []
+    for a, b in sorted(windows):
+        if out and a <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return out
 
 
 def extract_frame(src: str | Path, t: float, dst: str | Path, width: int | None = None) -> Path:

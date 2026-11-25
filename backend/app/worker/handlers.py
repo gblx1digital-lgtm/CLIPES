@@ -316,14 +316,14 @@ def _analyze(db, job, video, src, auto, creator, ai_caller) -> str:  # noqa: ANN
         wav = media.extract_audio_wav(src, work / "audio.wav")
         q.progress(db, job, 18, "Medindo intensidade do áudio")
         profile = audio_profile(wav)
-    q.progress(db, job, 25, "Detectando mudanças de cena")
-    scenes = media.detect_scene_changes(src)
+    limit = min(16, auto.max_clips_per_video * 2)
+    scenes = _scene_changes(db, job, src, duration, profile, auto, limit, meta)
     meta["scene_changes"] = len(scenes)
 
     transcript = []
     tstatus = transcription.provider_status()
     if tstatus["available"] and info.has_audio:
-        q.progress(db, job, 32, "Transcrevendo fala")
+        q.progress(db, job, 49, "Transcrevendo fala")
         try:
             transcript = transcription.transcribe(work / "audio.wav")
         except Exception as e:  # noqa: BLE001
@@ -333,14 +333,13 @@ def _analyze(db, job, video, src, auto, creator, ai_caller) -> str:  # noqa: ANN
     meta["transcript_segments"] = len(transcript)
     signals = SignalSummary(audio=profile, scene_changes=scenes, transcript=transcript)
 
-    q.progress(db, job, 45, "Procurando webcam do streamer")
+    q.progress(db, job, 50, "Procurando webcam do streamer")
     sample_times = [duration * (0.05 + 0.9 * i / 11) for i in range(12)]
     detected = layout_svc.detect_webcam(media.extract_frames_gray(src, sample_times))
     video.layout_hint = detected
     db.commit()
 
     q.progress(db, job, 52, "Selecionando momentos candidatos")
-    limit = min(16, auto.max_clips_per_video * 2)
     cands = find_candidates(signals, duration, min_len=auto.min_clip_seconds, max_len=auto.max_clip_seconds, limit=limit)
     meta["candidates"] = [{"start_s": c.start_s, "end_s": c.end_s, "peak_s": c.peak_s, "signal_score": c.signal_score,
                            **c.features} for c in cands]
@@ -372,15 +371,23 @@ def _analyze(db, job, video, src, auto, creator, ai_caller) -> str:  # noqa: ANN
                                            frames=frames))
 
     video_meta = {"creator": creator.name, "title": video.title, "platform": video.platform, "duration": duration}
+    # Lotes avaliados em paralelo pela IA (a sessão do banco só é usada nesta thread)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     decisions = []
     batch = max(1, s.ai_max_candidates_per_request)
-    for b in range(0, len(evidences), batch):
-        chunk = evidences[b:b + batch]
-        q.progress(db, job, 55 + 35 * b / len(evidences), f"IA avaliando candidatos {b + 1}-{b + len(chunk)} de {len(evidences)}")
-        if q.is_cancelled(db, job):
-            raise PermanentError("Cancelado.")
-        decisions += analyze_candidates(video_meta, chunk, min_len=auto.min_clip_seconds, max_len=auto.max_clip_seconds,
-                                        duration=duration, caller=ai_caller)
+    chunks = [evidences[b:b + batch] for b in range(0, len(evidences), batch)]
+    q.progress(db, job, 56, f"IA avaliando {len(evidences)} momentos")
+    with ThreadPoolExecutor(max_workers=min(3, len(chunks))) as pool:
+        futures = [pool.submit(analyze_candidates, video_meta, chunk, min_len=auto.min_clip_seconds,
+                               max_len=auto.max_clip_seconds, duration=duration, caller=ai_caller) for chunk in chunks]
+        for done, fut in enumerate(as_completed(futures), 1):
+            decisions += fut.result()
+            q.progress(db, job, 56 + 34 * done / len(chunks), f"IA avaliou {done} de {len(chunks)} lotes")
+            if q.is_cancelled(db, job):
+                for f in futures:
+                    f.cancel()
+                raise PermanentError("Cancelado.")
 
     q.progress(db, job, 92, "Pontuando e organizando cortes")
     created = _create_clips(db, video, creator, cands, decisions, auto, info, src, detected)
@@ -396,6 +403,35 @@ def _analyze(db, job, video, src, auto, creator, ai_caller) -> str:  # noqa: ANN
                     f"IA analisou “{video.title[:80]}”: {len(cands)} candidatos, {created} cortes criados",
                     level="success", ref_type="video", ref_id=video.id)
     return f"{created} cortes criados de {len(cands)} candidatos"
+
+
+def _scene_changes(db, job, src, duration, profile, auto, limit, meta) -> list[float]:  # noqa: ANN001
+    """Cortes de cena. Com áudio, analisa a imagem só nos trechos que o áudio apontou (muito mais rápido em
+    lives longas); sem áudio, ou quando os trechos cobrem quase o vídeo todo, varre o vídeo inteiro."""
+    windows: list[tuple[float, float]] = []
+    if profile is not None:
+        pre = find_candidates(SignalSummary(audio=profile, scene_changes=[]), duration,
+                              min_len=auto.min_clip_seconds, max_len=auto.max_clip_seconds, limit=limit)
+        windows = media.merge_windows([(max(0.0, c.start_s - 10), min(duration, c.end_s + 10)) for c in pre])
+    covered = sum(b - a for a, b in windows)
+    if not windows or covered > duration * 0.6:
+        windows = [(0.0, duration)]
+    meta["scene_scan_seconds"] = round(sum(b - a for a, b in windows), 1)
+    total = sum(b - a for a, b in windows)
+    scenes: list[float] = []
+    done = 0.0
+    for a, b in windows:
+        span = b - a
+
+        def report(frac: float, a=a, span=span, done=done) -> None:  # noqa: ANN001
+            pct = (done + frac * span) / total
+            q.progress(db, job, 22 + 26 * pct, f"Analisando imagem {pct * 100:.0f}%")
+
+        scenes += media.detect_scene_changes(src, start=a, duration=span, on_progress=report)
+        done += span
+        if q.is_cancelled(db, job):
+            raise PermanentError("Cancelado.")
+    return sorted(scenes)
 
 
 def _frame_times(c, n: int) -> list[float]:  # noqa: ANN001
