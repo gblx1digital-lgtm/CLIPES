@@ -157,23 +157,26 @@ def _call_claude(content: list[dict]) -> dict[str, Any]:
     if not s.anthropic_api_key:
         raise AIUnavailable("ANTHROPIC_API_KEY não configurada. Defina a chave no arquivo .env para ativar a análise com IA.")
     client = anthropic.Anthropic(api_key=s.anthropic_api_key, max_retries=3, timeout=600)
+    params = dict(
+        model=s.ai_model,
+        max_tokens=16000,
+        system=SYSTEM_PROMPT,
+        thinking={"type": "adaptive"},
+        output_config={"effort": s.ai_effort, "format": {"type": "json_schema", "schema": _output_schema()}},
+        messages=[{"role": "user", "content": content}],
+    )
     try:
-        response = client.beta.messages.create(
-            model=s.ai_model,
-            max_tokens=16000,
-            system=SYSTEM_PROMPT,
-            thinking={"type": "adaptive"},
-            output_config={"effort": s.ai_effort, "format": {"type": "json_schema", "schema": _output_schema()}},
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
-            messages=[{"role": "user", "content": content}],
-        )
+        if supports_server_fallback(s.ai_model):
+            # Se o modelo recusar um trecho, a API tenta de novo em outro modelo na mesma chamada
+            response = client.beta.messages.create(**params, betas=["server-side-fallback-2026-07-01"], fallbacks="default")
+        else:
+            response = client.messages.create(**params)
     except anthropic.AuthenticationError as e:
         raise AIUnavailable("Chave da Anthropic inválida (401). Verifique ANTHROPIC_API_KEY.") from e
     except anthropic.PermissionDeniedError as e:
         raise AIUnavailable(f"Chave sem permissão para o modelo {s.ai_model}.") from e
     except anthropic.BadRequestError as e:
-        raise AIError(f"Requisição rejeitada pela API: {e.message}") from e
+        raise AIUnavailable(f"Requisição rejeitada pela API (modelo {s.ai_model}): {e.message}") from e
     except anthropic.RateLimitError as e:
         raise AIError("Limite de requisições da API atingido; o job será reprocessado.") from e
     except anthropic.APIStatusError as e:
@@ -191,6 +194,11 @@ def _call_claude(content: list[dict]) -> dict[str, Any]:
     log.info("Claude respondeu (request_id=%s, in=%s, out=%s)", getattr(response, "_request_id", None),
              response.usage.input_tokens, response.usage.output_tokens)
     return json.loads(text)
+
+
+def supports_server_fallback(model: str) -> bool:
+    """Só os modelos grandes aceitam o parâmetro `fallbacks` (o Haiku, por exemplo, rejeita)."""
+    return model.startswith(("claude-opus-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-fable-5-2"))
 
 
 # Ponto de injeção para testes

@@ -86,3 +86,41 @@ def test_keyword_matching_and_durations():
     assert matches_keywords("qualquer coisa", [])
     assert parse_iso8601_duration("PT1H2M3S") == 3723
     assert parse_twitch_duration("3h2m1s") == 10921
+
+
+def test_claude_call_omits_fallbacks_for_models_without_support(monkeypatch):
+    import anthropic
+
+    from app.config import get_settings
+    from app.services import ai_analysis
+
+    calls = {}
+
+    class Resp:
+        stop_reason = "end_turn"
+        usage = type("U", (), {"input_tokens": 1, "output_tokens": 1})()
+        content = [type("B", (), {"type": "text", "text": '{"clips": []}'})()]
+
+    class Msgs:
+        def __init__(self, kind):
+            self.kind = kind
+
+        def create(self, **kw):
+            calls[self.kind] = kw
+            return Resp()
+
+    class FakeClient:
+        def __init__(self, **kw):
+            self.messages = Msgs("plain")
+            self.beta = type("Beta", (), {"messages": Msgs("beta")})()
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeClient)
+    s = get_settings()
+    monkeypatch.setattr(s, "anthropic_api_key", "teste")
+    monkeypatch.setattr(s, "ai_model", "claude-haiku-5-5")
+    assert ai_analysis._call_claude([{"type": "text", "text": "x"}]) == {"clips": []}
+    assert "plain" in calls and "fallbacks" not in calls["plain"]
+    calls.clear()
+    monkeypatch.setattr(s, "ai_model", "claude-opus-5-5")
+    ai_analysis._call_claude([{"type": "text", "text": "x"}])
+    assert calls["beta"]["fallbacks"] == "default"
