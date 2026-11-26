@@ -61,7 +61,7 @@ def clip_out(c: Clip, *, detail: bool = False) -> dict[str, Any]:
         out.update({
             "score_breakdown": c.score_breakdown, "rationale": c.rationale, "signals": c.signals,
             "analysis_source": c.analysis_source, "review_note": c.review_note,
-            "title_options": c.title_options or [],
+            "title_options": c.title_options or [], "hashtags": c.hashtags or [],
             "source": {
                 "id": v.id, "width": v.width, "height": v.height, "duration_s": v.duration_s, "fps": v.fps,
                 "has_audio": v.has_audio, "media_ready": v.media_status == "ready",

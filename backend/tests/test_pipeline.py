@@ -37,6 +37,7 @@ def fake_claude(content):
                       "title": f"Momento {idx}", "summary": "Reação forte", "hook": "Grito no início",
                       "category": "reacoes", "rationale": "Pico de áudio claro",
                       "title_options": [f"Opção {k} do momento {idx}" for k in range(1, 6)] + ["  ", "Opção 1 do momento 0"],
+                      "hashtags": ["#GTA6", "Coringa", "#Explosão", "#gta6"],
                       "scores": {k: 8 for k in ai_analysis._output_schema()["properties"]["clips"]["items"]["properties"]["scores"]["properties"]}})
     images = sum(1 for b in content if b["type"] == "image")
     assert images > 0, "a IA deve receber quadros do vídeo"
@@ -201,15 +202,17 @@ def test_title_options_on_clips(client, monkeypatch):
     clips = client.get("/api/clips").json()["items"]
     assert clips, "o fluxo completo cria cortes antes deste teste"
     c = client.get(f"/api/clips/{clips[0]['id']}").json()
-    # A análise já grava as opções (limpas: sem vazias/repetidas, no máximo 5)
+    # A análise já grava as opções (limpas: sem vazias/repetidas, no máximo 5) e as hashtags normalizadas
     assert 1 <= len(c["title_options"]) <= 5 and all(t.strip() for t in c["title_options"])
+    assert c["hashtags"] == ["#gta6", "#coringa", "#explosao"]
 
     seen = {}
 
     def fake_titles(content):
         seen["prompt"] = content[0]["text"]
         return {"titles": ["Coringa não acreditou nisso 😱", "  ", "O GTA 6 tá insano demais", "Coringa não acreditou nisso 😱",
-                           "Quem aí faria o mesmo?", "Explosão no prédio", "Fuga de helicóptero", "Sexto título sobrando"]}
+                           "Quem aí faria o mesmo?", "Explosão no prédio", "Fuga de helicóptero", "Sexto título sobrando"],
+                "hashtags": ["#GTAVI", "#Helicóptero", "gta 6"]}
 
     monkeypatch.setattr(ai_analysis, "_call_titles", fake_titles)
     r = client.post(f"/api/clips/{c['id']}/title-options")
@@ -217,6 +220,11 @@ def test_title_options_on_clips(client, monkeypatch):
     opts = r.json()["title_options"]
     assert opts[0] == "Coringa não acreditou nisso 😱" and len(opts) == 5 and len(set(opts)) == 5
     assert "NOVAS" in seen["prompt"]  # pede opções diferentes das que já existiam
+    assert r.json()["hashtags"] == ["#gtavi", "#helicoptero", "#gta6"]
+    # Só hashtags: mantém as opções de título que já estão na tela
+    monkeypatch.setattr(ai_analysis, "_call_titles", lambda content: {"titles": ["Outro"], "hashtags": ["#gta6", "#coringa"]})
+    r = client.post(f"/api/clips/{c['id']}/title-options", json={"keep_titles": True})
+    assert r.status_code == 200 and r.json()["title_options"] == opts and r.json()["hashtags"] == ["#gta6", "#coringa"]
     # Usar uma opção como título do corte
     r = client.patch(f"/api/clips/{c['id']}", json={"title": opts[2]})
     assert r.status_code == 200 and r.json()["title"] == opts[2]

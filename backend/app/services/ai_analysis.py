@@ -10,6 +10,8 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,7 +38,13 @@ TITLE_RULES = """Regras das opções de título (title_options):
 - cada uma num estilo diferente: curiosidade, humor, choque/hype, pergunta para o público, direto ao ponto;
 - fiéis ao que acontece no corte: não prometa nada que não aparece no vídeo;
 - linguagem natural de quem posta cortes de GTA 6 no Brasil; pode citar o criador ou o GTA 6 quando ajudar;
-- no máximo 1 emoji por título e nenhuma hashtag."""
+- no máximo 1 emoji por título e nenhuma hashtag (as hashtags vêm separadas)."""
+
+HASHTAG_RULES = """Regras das hashtags (hashtags):
+- de 5 a 7 hashtags do segmento do corte, para postar junto com o título;
+- misture: 2 ou 3 do nicho (ex.: #gta6, #gtavi, #gta), 1 do criador e 2 ou 3 sobre o que acontece no corte;
+- minúsculas, sem acento e sem espaço, cada uma começando com #;
+- nada genérico demais como #fyp, #viral ou #foryou."""
 
 
 SYSTEM_PROMPT = f"""Você é o editor-chefe de um canal de cortes de GTA 6 para TikTok, Reels e YouTube Shorts.
@@ -62,10 +70,11 @@ Seja exigente e calibrado: 9-10 só para momentos realmente excepcionais. Notas 
 
 title: título curto interno em português (para organização e legenda do post; NÃO vai dentro do vídeo).
 title_options: 5 opções de título para postar o corte no TikTok, Reels e Shorts. Veja as regras abaixo.
+hashtags: hashtags do segmento para postar junto com o título. Veja as regras abaixo.
 summary: 1-2 frases do que acontece. hook: o que prende nos primeiros segundos. rationale: por que esse
 corte funciona ou não. Responda sempre em português do Brasil.
 
-""" + TITLE_RULES
+""" + TITLE_RULES + "\n\n" + HASHTAG_RULES
 
 
 def _output_schema() -> dict[str, Any]:
@@ -94,9 +103,10 @@ def _output_schema() -> dict[str, Any]:
                         },
                         "rationale": {"type": "string"},
                         "title_options": {"type": "array", "items": {"type": "string"}},
+                        "hashtags": {"type": "array", "items": {"type": "string"}},
                     },
                     "required": ["candidate_index", "keep", "start_s", "end_s", "title", "summary", "hook",
-                                 "category", "scores", "rationale", "title_options"],
+                                 "category", "scores", "rationale", "title_options", "hashtags"],
                     "additionalProperties": False,
                 },
             }
@@ -127,6 +137,7 @@ class AIClipDecision:
     scores: dict[str, float]
     rationale: str
     title_options: list[str]
+    hashtags: list[str]
 
 
 def build_content(video_meta: dict[str, Any], evidences: list[CandidateEvidence], min_len: float, max_len: float) -> list[dict]:
@@ -258,6 +269,7 @@ def analyze_candidates(
             scores={k: float(item.get("scores", {}).get(k, 0)) for k in CRITERIA},
             rationale=str(item.get("rationale", "")).strip(),
             title_options=clean_titles(item.get("title_options")),
+            hashtags=clean_hashtags(item.get("hashtags")),
         ))
     return out
 
@@ -278,11 +290,11 @@ def _clamp_bounds(start: float, end: float, c: Candidate, min_len: float, max_le
     return round(start, 2), round(end, 2)
 
 
-# ------------------------------------------------------------------ opções de título (avulso)
-TITLES_SYSTEM = """Você escreve títulos para cortes de GTA 6 de criadores brasileiros, postados no TikTok, Reels e Shorts.
-O título é a legenda do post (não vai dentro do vídeo) e precisa fazer a pessoa parar de rolar a tela.
+# ------------------------------------------------------------------ opções de título e hashtags (avulso)
+POST_SYSTEM = """Você escreve títulos e hashtags para cortes de GTA 6 de criadores brasileiros, postados no TikTok,
+Reels e Shorts. O título é a legenda do post (não vai dentro do vídeo) e precisa fazer a pessoa parar de rolar a tela.
 
-""" + TITLE_RULES
+""" + TITLE_RULES + "\n\n" + HASHTAG_RULES
 
 
 def clean_titles(raw: Any, limit: int = 5) -> list[str]:
@@ -295,19 +307,38 @@ def clean_titles(raw: Any, limit: int = 5) -> list[str]:
     return out[:limit]
 
 
+def clean_hashtags(raw: Any, limit: int = 8) -> list[str]:
+    """#minúsculas, sem acento, espaço ou pontuação, sem repetição ("GTA 6" -> #gta6, "#Explosão" -> #explosao).
+    Um item com várias hashtags ("#gta6 #coringa") vira várias; sem isso, as palavras são juntadas."""
+    out: list[str] = []
+    for item in raw or []:
+        text = str(item)
+        pieces = text.split("#") if text.count("#") > 1 else [text]
+        for piece in pieces:
+            tag = unicodedata.normalize("NFKD", piece).encode("ascii", "ignore").decode().lower()
+            tag = re.sub(r"[^a-z0-9_]", "", tag)[:40]
+            if tag and not tag.isdigit() and f"#{tag}" not in out:
+                out.append(f"#{tag}")
+    return out[:limit]
+
+
 def _call_titles(content: list[dict]) -> dict[str, Any]:
     schema = {
         "type": "object",
-        "properties": {"titles": {"type": "array", "items": {"type": "string"}}},
-        "required": ["titles"],
+        "properties": {
+            "titles": {"type": "array", "items": {"type": "string"}},
+            "hashtags": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["titles", "hashtags"],
         "additionalProperties": False,
     }
     # Tarefa curta: esforço baixo responde em poucos segundos
-    return _request(TITLES_SYSTEM, content, schema, effort="low", max_tokens=4000)
+    return _request(POST_SYSTEM, content, schema, effort="low", max_tokens=4000)
 
 
-def suggest_titles(clip: dict[str, Any], *, avoid: list[str] | None = None, caller: ClaudeCaller | None = None) -> list[str]:
-    """Gera 5 opções de título para um corte já analisado (usa o resumo/gancho que a IA escreveu)."""
+def suggest_post(clip: dict[str, Any], *, avoid: list[str] | None = None,
+                 caller: ClaudeCaller | None = None) -> tuple[list[str], list[str]]:
+    """Gera 5 opções de título e as hashtags do segmento para um corte já analisado."""
     caller = caller or _call_titles
     lines = [
         f"Criador: {clip.get('creator')}",
@@ -320,9 +351,9 @@ def suggest_titles(clip: dict[str, Any], *, avoid: list[str] | None = None, call
     ]
     if avoid:
         lines.append("Opções já mostradas (escreva 5 NOVAS, diferentes destas):\n" + "\n".join(f"- {t}" for t in avoid))
-    lines.append("Devolva as 5 opções em `titles`.")
+    lines.append("Devolva as 5 opções em `titles` e as hashtags em `hashtags`.")
     data = caller([{"type": "text", "text": "\n".join(lines)}])
     titles = clean_titles(data.get("titles"))
     if not titles:
         raise AIError("A IA não devolveu opções de título.")
-    return titles
+    return titles, clean_hashtags(data.get("hashtags"))

@@ -184,6 +184,7 @@ export type ClipDetail = Clip & {
   analysis_source: string;
   review_note: string | null;
   title_options: string[];
+  hashtags: string[];
   source: {
     id: number;
     width: number;

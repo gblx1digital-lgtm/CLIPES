@@ -170,9 +170,13 @@ class ExportIn(BaseModel):
     quality: Literal["standard", "high", "max"] | None = None
 
 
+class TitleOptionsBody(BaseModel):
+    keep_titles: bool = False  # True: só gera as hashtags e mantém as opções de título atuais
+
+
 @router.post("/{clip_id}/title-options")
-def generate_title_options(clip_id: int, db: Session = Depends(get_db)):
-    """Gera (ou troca por novas) 5 opções de título para postar o corte."""
+def generate_title_options(clip_id: int, body: TitleOptionsBody | None = None, db: Session = Depends(get_db)):
+    """Gera (ou troca por novas) 5 opções de título e as hashtags do segmento para postar o corte."""
     c = db.get(Clip, clip_id)
     if not c:
         raise HTTPException(404, "Corte não encontrado.")
@@ -182,13 +186,16 @@ def generate_title_options(clip_id: int, db: Session = Depends(get_db)):
         "duration_s": c.end_s - c.start_s, "category": CATEGORY_LABELS.get(c.category, c.category),
         "title": c.title, "summary": c.summary, "hook": c.hook, "rationale": c.rationale,
     }
+    keep = bool(body and body.keep_titles and c.title_options)
     try:
-        titles = ai_analysis.suggest_titles(ctx, avoid=c.title_options or None)
+        titles, tags = ai_analysis.suggest_post(ctx, avoid=None if keep else (c.title_options or None))
     except ai_analysis.AIUnavailable as e:
         raise HTTPException(400, redact_secrets(str(e))) from e
     except ai_analysis.AIError as e:
         raise HTTPException(502, redact_secrets(str(e))) from e
-    c.title_options = titles
+    if not keep:
+        c.title_options = titles
+    c.hashtags = tags or c.hashtags
     db.commit()
     db.refresh(c)
     return clip_out(c, detail=True)

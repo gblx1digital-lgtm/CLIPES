@@ -194,3 +194,11 @@ def test_anthropic_key_pasted_with_curl_example(monkeypatch):
     assert Settings().anthropic_api_key == "sk-ant-api03-Zz9"
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     assert Settings().anthropic_api_key is None
+
+
+def test_clean_hashtags_normalizes_for_posting():
+    from app.services.ai_analysis import clean_hashtags
+
+    raw = ["#GTA6", "gta vi", "#Explosão", "#gta6", "#Coringa!", "  ", "#2026", "#fuga de carro", "#gta6 #LoudCoringa"]
+    assert clean_hashtags(raw) == ["#gta6", "#gtavi", "#explosao", "#coringa", "#fugadecarro", "#loudcoringa"]
+    assert clean_hashtags(None) == [] and len(clean_hashtags([f"#t{i}" for i in range(20)])) == 8

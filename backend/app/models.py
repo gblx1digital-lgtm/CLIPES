@@ -140,6 +140,8 @@ class Clip(Base):
     title: Mapped[str] = mapped_column(String(300))
     # Opções de título/legenda para postar (geradas pela IA); o usuário escolhe uma
     title_options: Mapped[list[str] | None] = mapped_column(JSON)
+    # Hashtags do segmento para postar junto com o título
+    hashtags: Mapped[list[str] | None] = mapped_column(JSON)
     summary: Mapped[str | None] = mapped_column(Text)
     hook: Mapped[str | None] = mapped_column(Text)
     category: Mapped[str] = mapped_column(String(32), index=True)

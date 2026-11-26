@@ -231,21 +231,25 @@ function Info({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-/** Opções de título/legenda geradas pela IA: copiar para colar no TikTok/Reels/Shorts ou usar como título do corte. */
+/** Opções de título e hashtags geradas pela IA: copiar para colar no TikTok/Reels/Shorts ou usar como título do corte. */
 function TitleOptions({ clip }: { clip: ClipDetail }) {
   const qc = useQueryClient();
   const toast = useToast();
   const { update } = useClipActions();
-  const [copied, setCopied] = useState<number | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [withTags, setWithTags] = useState(true);
   const generate = useMutation({
-    mutationFn: () => api.post<ClipDetail>(`/api/clips/${clip.id}/title-options`),
-    onSuccess: (c) => {
+    mutationFn: (keepTitles: boolean) => api.post<ClipDetail>(`/api/clips/${clip.id}/title-options`, { keep_titles: keepTitles }),
+    onSuccess: (c, keepTitles) => {
       qc.setQueryData(["clip", clip.id], c);
-      toast("good", "Novas opções de título prontas.");
+      toast("good", keepTitles ? "Hashtags prontas." : "Novas opções de título prontas.");
     },
     onError: (e: Error) => toast("bad", e.message),
   });
-  const copy = async (text: string, i: number) => {
+  const options = clip.title_options ?? [];
+  const tags = clip.hashtags ?? [];
+  const tagLine = tags.join(" ");
+  const copy = async (text: string, key: string, message: string) => {
     try {
       await navigator.clipboard.writeText(text);
     } catch {
@@ -256,18 +260,29 @@ function TitleOptions({ clip }: { clip: ClipDetail }) {
       document.execCommand("copy");
       ta.remove();
     }
-    setCopied(i);
-    toast("good", "Título copiado.");
-    setTimeout(() => setCopied((c) => (c === i ? null : c)), 1500);
+    setCopied(key);
+    toast("good", message);
+    setTimeout(() => setCopied((c) => (c === key ? null : c)), 1500);
   };
-  const options = clip.title_options ?? [];
+  const copyTitle = (t: string, i: number) =>
+    withTags && tagLine
+      ? copy(`${t}\n${tagLine}`, `t${i}`, "Título e hashtags copiados.")
+      : copy(t, `t${i}`, "Título copiado.");
   return (
     <div className="card">
-      <div className="flex items-center justify-between gap-3 border-b hairline px-4 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b hairline px-4 py-2.5">
         <p className="text-xs font-medium">Títulos para postar</p>
-        <button className="btn-ghost btn-sm" disabled={generate.isPending} onClick={() => generate.mutate()}>
-          <Sparkles size={12} /> {generate.isPending ? "Gerando…" : options.length ? "Gerar outras" : "Gerar opções"}
-        </button>
+        <div className="flex items-center gap-3">
+          {tagLine && (
+            <label className="flex cursor-pointer items-center gap-1.5 text-2xs text-muted">
+              <input type="checkbox" checked={withTags} onChange={(e) => setWithTags(e.target.checked)} />
+              copiar com hashtags
+            </label>
+          )}
+          <button className="btn-ghost btn-sm" disabled={generate.isPending} onClick={() => generate.mutate(false)}>
+            <Sparkles size={12} /> {generate.isPending ? "Gerando…" : options.length ? "Gerar outras" : "Gerar opções"}
+          </button>
+        </div>
       </div>
       {options.length === 0 ? (
         <p className="px-4 py-3 text-xs text-muted">
@@ -290,12 +305,34 @@ function TitleOptions({ clip }: { clip: ClipDetail }) {
                   Usar
                 </button>
               )}
-              <button className="btn-ghost btn-icon h-7 w-7" title="Copiar título" aria-label="Copiar título" onClick={() => void copy(t, i)}>
-                {copied === i ? <Check size={13} /> : <Copy size={13} />}
+              <button
+                className="btn-ghost btn-icon h-7 w-7"
+                title={withTags && tagLine ? "Copiar título com hashtags" : "Copiar título"}
+                aria-label="Copiar título"
+                onClick={() => void copyTitle(t, i)}
+              >
+                {copied === `t${i}` ? <Check size={13} /> : <Copy size={13} />}
               </button>
             </li>
           ))}
         </ul>
+      )}
+      {options.length > 0 && (
+        <div className="flex items-center gap-2 border-t hairline px-4 py-2.5">
+          <span className="text-2xs text-faint">Hashtags</span>
+          {tagLine ? (
+            <>
+              <span className="min-w-0 flex-1 select-text text-[13px] text-info">{tagLine}</span>
+              <button className="btn-ghost btn-icon h-7 w-7" title="Copiar hashtags" aria-label="Copiar hashtags" onClick={() => void copy(tagLine, "tags", "Hashtags copiadas.")}>
+                {copied === "tags" ? <Check size={13} /> : <Copy size={13} />}
+              </button>
+            </>
+          ) : (
+            <button className="btn-ghost btn-sm ml-auto" disabled={generate.isPending} onClick={() => generate.mutate(true)}>
+              <Sparkles size={12} /> Gerar hashtags
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
