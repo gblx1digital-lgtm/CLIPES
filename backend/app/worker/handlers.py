@@ -8,12 +8,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..logging_setup import redact_secrets
-from ..models import Clip, Creator, Export, Job, SourceVideo, utcnow
+from ..models import ActivityEvent, Clip, Creator, Export, Job, SourceVideo, utcnow
 from ..queue import jobs as q
 from ..services import activity, layout as layout_svc, media, render, scoring, storage, transcription
 from ..services.ai_analysis import AIUnavailable, CandidateEvidence, analyze_candidates
@@ -620,6 +620,24 @@ def reconcile_orphans(db: Session) -> int:
             e.status, e.error = "failed", "Interrompido (servidor reiniciou). Tente exportar de novo."
             e.clip.render_status = "failed"
             n += 1
+    db.commit()
+    return n
+
+
+def scrub_stored_secrets(db: Session) -> int:
+    """Esconde chaves de API que versões anteriores gravaram em mensagens de erro (aparecem no painel)."""
+    targets = [(Job, "error"), (SourceVideo, "analysis_error"), (SourceVideo, "media_error"), (Export, "error"),
+               (Creator, "last_check_error"), (ActivityEvent, "message")]
+    n = 0
+    for model, field in targets:
+        col = getattr(model, field)
+        rows = db.scalars(select(model).where(or_(col.like("%sk-ant-%"), col.like("%AIza%"), col.like("%key=%")))).all()
+        for row in rows:
+            old = getattr(row, field)
+            new = redact_secrets(old)
+            if new != old:
+                setattr(row, field, new)
+                n += 1
     db.commit()
     return n
 

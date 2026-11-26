@@ -22,7 +22,8 @@ from sqlalchemy import update
 from ..models import Job, utcnow
 from ..services import activity
 from ..services.settings_store import set_value
-from .handlers import HANDLERS, NON_RETRYABLE, due_monitors, on_requeue, reconcile_orphans
+from .handlers import (HANDLERS, NON_RETRYABLE, due_monitors, on_requeue, reconcile_orphans,
+                       scrub_stored_secrets)
 
 log = logging.getLogger("clipes.worker")
 
@@ -98,6 +99,10 @@ def main() -> None:
     setup_logging("worker")
     s = get_settings()
     init_db()
+    with SessionLocal() as db:
+        scrubbed = scrub_stored_secrets(db)
+        if scrubbed:
+            log.warning("%s mensagens de erro tinham chaves de API; agora estão escondidas", scrubbed)
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)

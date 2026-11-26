@@ -180,6 +180,21 @@ def test_failed_ai_batch_keeps_clips_from_other_batches(client, test_video, monk
     v = client.get(f"/api/videos/{video_id}").json()
     assert v["analysis_status"] == "queued" and "ConnectError" in v["analysis_error"]
 
+
+def test_leaked_keys_are_scrubbed_from_stored_errors(client):
+    from app.models import ActivityEvent
+    from app.worker.handlers import scrub_stored_secrets
+
+    leak = "Falha de conexão (LocalProtocolError: Illegal header value b'Bearer x-api-key: sk-ant-usr-SECRET123AA')"
+    with SessionLocal() as db:
+        db.add(Job(type="analyze_video", status="failed", payload={}, error=leak))
+        db.add(ActivityEvent(kind="analysis", message=leak, level="error"))
+        db.commit()
+        assert scrub_stored_secrets(db) >= 2
+        assert not db.query(Job).filter(Job.error.like("%SECRET123%")).count()
+        assert not db.query(ActivityEvent).filter(ActivityEvent.message.like("%SECRET123%")).count()
+        assert db.query(Job).filter(Job.error.like("%sk-ant-***%")).count() == 1
+
 def test_automation_validation(client):
     r = client.put("/api/automation", json={"min_clip_seconds": 70, "max_clip_seconds": 60})
     assert r.status_code == 422

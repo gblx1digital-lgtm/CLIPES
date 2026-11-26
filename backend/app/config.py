@@ -5,6 +5,7 @@ Parâmetros operacionais editáveis pelo painel (automação) ficam no banco: ve
 """
 from __future__ import annotations
 
+import re
 import shutil
 from functools import lru_cache
 from pathlib import Path
@@ -70,6 +71,17 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             v = v.strip().strip('"').strip("'").strip()
             return v or None if v == "" else v
+        return v
+
+    @field_validator("anthropic_api_key", mode="after")
+    @classmethod
+    def _only_the_key(cls, v):  # noqa: ANN001
+        """Aceita a chave colada junto com outro texto (ex.: o comando curl de exemplo do console da Anthropic,
+        que traz a chave no meio): usa só o trecho sk-ant-... Um texto assim no cabeçalho derruba a conexão."""
+        if v:
+            m = re.search(r"sk-ant-[A-Za-z0-9_\-]+", v)
+            if m:
+                return m.group(0)
         return v
 
     @property

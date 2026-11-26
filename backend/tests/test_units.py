@@ -136,3 +136,17 @@ def test_redact_secrets_hides_api_keys():
     assert "sk-ant-api03" not in out and "AbC_dEf" not in out
     assert "AIzaSyA123" not in out and "key=***" in out
     assert out.startswith("Falha de conexão com a API Anthropic")
+
+
+def test_anthropic_key_pasted_with_curl_example(monkeypatch):
+    """Colar o comando curl de exemplo do console no lugar da chave: a plataforma usa só o sk-ant-..."""
+    from app.config import Settings
+
+    pasted = ('curl https://api.anthropic.com/v1/messages \\\n  --header "x-api-key: sk-ant-usr-AbC123_x-Y9AA" \\\n'
+              '  --header "anthropic-version: 2026-10-21" \\\n  --header "content-type: application/json"\n')
+    monkeypatch.setenv("ANTHROPIC_API_KEY", pasted)
+    assert Settings().anthropic_api_key == "sk-ant-usr-AbC123_x-Y9AA"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", ' "sk-ant-api03-Zz9"\r\n')
+    assert Settings().anthropic_api_key == "sk-ant-api03-Zz9"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    assert Settings().anthropic_api_key is None

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
 import secrets
 
 from fastapi import FastAPI, Request
@@ -62,7 +63,7 @@ async def unhandled(request: Request, exc: Exception):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "version": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:7] or None}
 
 
 # Frontend compilado (produção): serve o SPA na mesma origem da API
