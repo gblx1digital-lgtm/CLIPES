@@ -183,6 +183,7 @@ export type ClipDetail = Clip & {
   signals: Record<string, number> | null;
   analysis_source: string;
   review_note: string | null;
+  title_options: string[];
   source: {
     id: number;
     width: number;

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Download, ExternalLink, Scissors, Undo2, X } from "lucide-react";
+import { Check, Copy, Download, ExternalLink, Scissors, Sparkles, Undo2, X } from "lucide-react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, CATEGORY_OPTIONS, type ClipDetail, type ExportItem } from "../lib/api";
 import { fmtDateTime, fmtDuration, fmtTimecode, PLATFORM_LABELS, RIGHTS_LABELS } from "../lib/format";
@@ -159,6 +160,8 @@ export function ClipViewer({ clipId, onClose }: { clipId: number | null; onClose
               )}
             </div>
 
+            <TitleOptions clip={clip} />
+
             <div className="card">
               <div className="flex items-center justify-between border-b hairline px-4 py-2.5">
                 <p className="text-xs font-medium">Pontuação de potencial viral</p>
@@ -224,6 +227,76 @@ function Info({ label, children }: { label: string; children: React.ReactNode })
     <div className="min-w-0">
       <dt className="text-faint">{label}</dt>
       <dd className="mt-0.5 truncate text-muted">{children}</dd>
+    </div>
+  );
+}
+
+/** Opções de título/legenda geradas pela IA: copiar para colar no TikTok/Reels/Shorts ou usar como título do corte. */
+function TitleOptions({ clip }: { clip: ClipDetail }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { update } = useClipActions();
+  const [copied, setCopied] = useState<number | null>(null);
+  const generate = useMutation({
+    mutationFn: () => api.post<ClipDetail>(`/api/clips/${clip.id}/title-options`),
+    onSuccess: (c) => {
+      qc.setQueryData(["clip", clip.id], c);
+      toast("good", "Novas opções de título prontas.");
+    },
+    onError: (e: Error) => toast("bad", e.message),
+  });
+  const copy = async (text: string, i: number) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    setCopied(i);
+    toast("good", "Título copiado.");
+    setTimeout(() => setCopied((c) => (c === i ? null : c)), 1500);
+  };
+  const options = clip.title_options ?? [];
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between gap-3 border-b hairline px-4 py-2.5">
+        <p className="text-xs font-medium">Títulos para postar</p>
+        <button className="btn-ghost btn-sm" disabled={generate.isPending} onClick={() => generate.mutate()}>
+          <Sparkles size={12} /> {generate.isPending ? "Gerando…" : options.length ? "Gerar outras" : "Gerar opções"}
+        </button>
+      </div>
+      {options.length === 0 ? (
+        <p className="px-4 py-3 text-xs text-muted">
+          {generate.isPending ? "A IA está escrevendo as opções…" : "Ainda não há opções para este corte. Clique em Gerar opções."}
+        </p>
+      ) : (
+        <ul className="divide-y divide-line/[0.06]">
+          {options.map((t, i) => (
+            <li key={t} className="flex items-center gap-2 px-4 py-2 text-[13px]">
+              <span className="min-w-0 flex-1 select-text">{t}</span>
+              {t === clip.title ? (
+                <Badge tone="good">Em uso</Badge>
+              ) : (
+                <button
+                  className="btn-ghost btn-sm"
+                  disabled={update.isPending}
+                  title="Usar como título do corte"
+                  onClick={() => update.mutate({ id: clip.id, body: { title: t } }, { onSuccess: () => toast("good", "Título do corte atualizado.") })}
+                >
+                  Usar
+                </button>
+              )}
+              <button className="btn-ghost btn-icon h-7 w-7" title="Copiar título" aria-label="Copiar título" onClick={() => void copy(t, i)}>
+                {copied === i ? <Check size={13} /> : <Copy size={13} />}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

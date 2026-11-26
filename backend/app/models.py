@@ -138,6 +138,8 @@ class Clip(Base):
     end_s: Mapped[float] = mapped_column(Float)
     # Título interno (organização/legenda do post). NUNCA é gravado no vídeo.
     title: Mapped[str] = mapped_column(String(300))
+    # Opções de título/legenda para postar (geradas pela IA); o usuário escolhe uma
+    title_options: Mapped[list[str] | None] = mapped_column(JSON)
     summary: Mapped[str | None] = mapped_column(Text)
     hook: Mapped[str | None] = mapped_column(Text)
     category: Mapped[str] = mapped_column(String(32), index=True)

@@ -36,6 +36,7 @@ def fake_claude(content):
         clips.append({"candidate_index": idx, "keep": True, "start_s": float(a), "end_s": float(b),
                       "title": f"Momento {idx}", "summary": "Reação forte", "hook": "Grito no início",
                       "category": "reacoes", "rationale": "Pico de áudio claro",
+                      "title_options": [f"Opção {k} do momento {idx}" for k in range(1, 6)] + ["  ", "Opção 1 do momento 0"],
                       "scores": {k: 8 for k in ai_analysis._output_schema()["properties"]["clips"]["items"]["properties"]["scores"]["properties"]}})
     images = sum(1 for b in content if b["type"] == "image")
     assert images > 0, "a IA deve receber quadros do vídeo"
@@ -194,6 +195,39 @@ def test_leaked_keys_are_scrubbed_from_stored_errors(client):
         assert not db.query(Job).filter(Job.error.like("%SECRET123%")).count()
         assert not db.query(ActivityEvent).filter(ActivityEvent.message.like("%SECRET123%")).count()
         assert db.query(Job).filter(Job.error.like("%sk-ant-***%")).count() == 1
+
+
+def test_title_options_on_clips(client, monkeypatch):
+    clips = client.get("/api/clips").json()["items"]
+    assert clips, "o fluxo completo cria cortes antes deste teste"
+    c = client.get(f"/api/clips/{clips[0]['id']}").json()
+    # A análise já grava as opções (limpas: sem vazias/repetidas, no máximo 5)
+    assert 1 <= len(c["title_options"]) <= 5 and all(t.strip() for t in c["title_options"])
+
+    seen = {}
+
+    def fake_titles(content):
+        seen["prompt"] = content[0]["text"]
+        return {"titles": ["Coringa não acreditou nisso 😱", "  ", "O GTA 6 tá insano demais", "Coringa não acreditou nisso 😱",
+                           "Quem aí faria o mesmo?", "Explosão no prédio", "Fuga de helicóptero", "Sexto título sobrando"]}
+
+    monkeypatch.setattr(ai_analysis, "_call_titles", fake_titles)
+    r = client.post(f"/api/clips/{c['id']}/title-options")
+    assert r.status_code == 200, r.text
+    opts = r.json()["title_options"]
+    assert opts[0] == "Coringa não acreditou nisso 😱" and len(opts) == 5 and len(set(opts)) == 5
+    assert "NOVAS" in seen["prompt"]  # pede opções diferentes das que já existiam
+    # Usar uma opção como título do corte
+    r = client.patch(f"/api/clips/{c['id']}", json={"title": opts[2]})
+    assert r.status_code == 200 and r.json()["title"] == opts[2]
+
+    def down(content):
+        raise ai_analysis.AIError("Falha de conexão com a API Anthropic (ConnectError).")
+
+    monkeypatch.setattr(ai_analysis, "_call_titles", down)
+    r = client.post(f"/api/clips/{c['id']}/title-options")
+    assert r.status_code == 502 and "ConnectError" in r.json()["detail"]
+    assert client.post("/api/clips/999999/title-options").status_code == 404
 
 def test_automation_validation(client):
     r = client.put("/api/automation", json={"min_clip_seconds": 70, "max_clip_seconds": 60})

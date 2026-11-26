@@ -31,6 +31,14 @@ class AIError(RuntimeError):
     pass
 
 
+TITLE_RULES = """Regras das opções de título (title_options):
+- exatamente 5 opções, em português do Brasil, com no máximo 90 caracteres cada;
+- cada uma num estilo diferente: curiosidade, humor, choque/hype, pergunta para o público, direto ao ponto;
+- fiéis ao que acontece no corte: não prometa nada que não aparece no vídeo;
+- linguagem natural de quem posta cortes de GTA 6 no Brasil; pode citar o criador ou o GTA 6 quando ajudar;
+- no máximo 1 emoji por título e nenhuma hashtag."""
+
+
 SYSTEM_PROMPT = f"""Você é o editor-chefe de um canal de cortes de GTA 6 para TikTok, Reels e YouTube Shorts.
 Seu trabalho é avaliar trechos de lives e vídeos de criadores brasileiros e decidir quais viram cortes.
 
@@ -53,8 +61,11 @@ Notas de 0 a 10 por critério: {", ".join(f"{k} ({label})" for k, (label, _w) in
 Seja exigente e calibrado: 9-10 só para momentos realmente excepcionais. Notas são estimativas.
 
 title: título curto interno em português (para organização e legenda do post; NÃO vai dentro do vídeo).
+title_options: 5 opções de título para postar o corte no TikTok, Reels e Shorts. Veja as regras abaixo.
 summary: 1-2 frases do que acontece. hook: o que prende nos primeiros segundos. rationale: por que esse
-corte funciona ou não. Responda sempre em português do Brasil."""
+corte funciona ou não. Responda sempre em português do Brasil.
+
+""" + TITLE_RULES
 
 
 def _output_schema() -> dict[str, Any]:
@@ -82,9 +93,10 @@ def _output_schema() -> dict[str, Any]:
                             "additionalProperties": False,
                         },
                         "rationale": {"type": "string"},
+                        "title_options": {"type": "array", "items": {"type": "string"}},
                     },
                     "required": ["candidate_index", "keep", "start_s", "end_s", "title", "summary", "hook",
-                                 "category", "scores", "rationale"],
+                                 "category", "scores", "rationale", "title_options"],
                     "additionalProperties": False,
                 },
             }
@@ -114,6 +126,7 @@ class AIClipDecision:
     category: str
     scores: dict[str, float]
     rationale: str
+    title_options: list[str]
 
 
 def build_content(video_meta: dict[str, Any], evidences: list[CandidateEvidence], min_len: float, max_len: float) -> list[dict]:
@@ -151,6 +164,11 @@ def build_content(video_meta: dict[str, Any], evidences: list[CandidateEvidence]
 
 
 def _call_claude(content: list[dict]) -> dict[str, Any]:
+    s = get_settings()
+    return _request(SYSTEM_PROMPT, content, _output_schema(), effort=s.ai_effort, max_tokens=16000)
+
+
+def _request(system: str, content: list[dict], schema: dict[str, Any], *, effort: str, max_tokens: int) -> dict[str, Any]:
     import anthropic
 
     s = get_settings()
@@ -159,10 +177,10 @@ def _call_claude(content: list[dict]) -> dict[str, Any]:
     client = anthropic.Anthropic(api_key=s.anthropic_api_key, max_retries=3, timeout=600)
     params = dict(
         model=s.ai_model,
-        max_tokens=16000,
-        system=SYSTEM_PROMPT,
+        max_tokens=max_tokens,
+        system=system,
         thinking={"type": "adaptive"},
-        output_config={"effort": s.ai_effort, "format": {"type": "json_schema", "schema": _output_schema()}},
+        output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
         messages=[{"role": "user", "content": content}],
     )
     try:
@@ -239,6 +257,7 @@ def analyze_candidates(
             category=category,
             scores={k: float(item.get("scores", {}).get(k, 0)) for k in CRITERIA},
             rationale=str(item.get("rationale", "")).strip(),
+            title_options=clean_titles(item.get("title_options")),
         ))
     return out
 
@@ -257,3 +276,53 @@ def _clamp_bounds(start: float, end: float, c: Candidate, min_len: float, max_le
         if end - start < min_len:
             start = max(0.0, end - min_len)
     return round(start, 2), round(end, 2)
+
+
+# ------------------------------------------------------------------ opções de título (avulso)
+TITLES_SYSTEM = """Você escreve títulos para cortes de GTA 6 de criadores brasileiros, postados no TikTok, Reels e Shorts.
+O título é a legenda do post (não vai dentro do vídeo) e precisa fazer a pessoa parar de rolar a tela.
+
+""" + TITLE_RULES
+
+
+def clean_titles(raw: Any, limit: int = 5) -> list[str]:
+    """Normaliza a lista vinda da IA: textos não vazios, sem repetição, até 150 caracteres, no máximo `limit`."""
+    out: list[str] = []
+    for t in raw or []:
+        t = " ".join(str(t).split()).strip().strip('"')[:150]
+        if t and t.lower() not in {o.lower() for o in out}:
+            out.append(t)
+    return out[:limit]
+
+
+def _call_titles(content: list[dict]) -> dict[str, Any]:
+    schema = {
+        "type": "object",
+        "properties": {"titles": {"type": "array", "items": {"type": "string"}}},
+        "required": ["titles"],
+        "additionalProperties": False,
+    }
+    # Tarefa curta: esforço baixo responde em poucos segundos
+    return _request(TITLES_SYSTEM, content, schema, effort="low", max_tokens=4000)
+
+
+def suggest_titles(clip: dict[str, Any], *, avoid: list[str] | None = None, caller: ClaudeCaller | None = None) -> list[str]:
+    """Gera 5 opções de título para um corte já analisado (usa o resumo/gancho que a IA escreveu)."""
+    caller = caller or _call_titles
+    lines = [
+        f"Criador: {clip.get('creator')}",
+        f"Vídeo de origem: {clip.get('source_title')}",
+        f"Duração do corte: {clip.get('duration_s', 0):.0f}s | Categoria: {clip.get('category')}",
+        f"Título interno atual: {clip.get('title')}",
+        f"O que acontece: {clip.get('summary') or '—'}",
+        f"Gancho dos primeiros segundos: {clip.get('hook') or '—'}",
+        f"Por que funciona: {clip.get('rationale') or '—'}",
+    ]
+    if avoid:
+        lines.append("Opções já mostradas (escreva 5 NOVAS, diferentes destas):\n" + "\n".join(f"- {t}" for t in avoid))
+    lines.append("Devolva as 5 opções em `titles`.")
+    data = caller([{"type": "text", "text": "\n".join(lines)}])
+    titles = clean_titles(data.get("titles"))
+    if not titles:
+        raise AIError("A IA não devolveu opções de título.")
+    return titles

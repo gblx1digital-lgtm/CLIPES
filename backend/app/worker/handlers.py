@@ -506,7 +506,8 @@ def _create_clips(db, video, creator, cands, decisions, auto, info, src, detecte
         approved = auto.approval_mode == "automatic" and score >= auto.auto_approve_min_score
         clip = Clip(
             source_video_id=video.id, creator_id=creator.id, start_s=d.start_s, end_s=d.end_s,
-            title=d.title, summary=d.summary, hook=d.hook, category=d.category, viral_score=score, tier=tier,
+            title=d.title, title_options=d.title_options or None, summary=d.summary, hook=d.hook,
+            category=d.category, viral_score=score, tier=tier,
             score_breakdown=scoring.breakdown(d.scores, cand.signal_score), rationale=d.rationale,
             signals={**cand.features, "peak_s": cand.peak_s, "signal_score": cand.signal_score},
             analysis_source=f"claude:{get_settings().ai_model}",

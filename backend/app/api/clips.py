@@ -10,12 +10,13 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, get_db
+from ..logging_setup import redact_secrets
 from ..models import CATEGORY_KEYS, Clip, Export, utcnow
 from ..queue import jobs as q
-from ..services import activity, render, storage
+from ..services import activity, ai_analysis, render, storage
 from ..services.layout import normalize_layout
 from ..services.settings_store import get_automation
-from .serializers import clip_out, export_out
+from .serializers import CATEGORY_LABELS, clip_out, export_out
 
 router = APIRouter(prefix="/api/clips", tags=["cortes"])
 
@@ -167,6 +168,30 @@ def update_clip(clip_id: int, body: ClipPatch, background: BackgroundTasks, db: 
 
 class ExportIn(BaseModel):
     quality: Literal["standard", "high", "max"] | None = None
+
+
+@router.post("/{clip_id}/title-options")
+def generate_title_options(clip_id: int, db: Session = Depends(get_db)):
+    """Gera (ou troca por novas) 5 opções de título para postar o corte."""
+    c = db.get(Clip, clip_id)
+    if not c:
+        raise HTTPException(404, "Corte não encontrado.")
+    ctx = {
+        "creator": c.creator.name if c.creator else None,
+        "source_title": c.source_video.title if c.source_video else None,
+        "duration_s": c.end_s - c.start_s, "category": CATEGORY_LABELS.get(c.category, c.category),
+        "title": c.title, "summary": c.summary, "hook": c.hook, "rationale": c.rationale,
+    }
+    try:
+        titles = ai_analysis.suggest_titles(ctx, avoid=c.title_options or None)
+    except ai_analysis.AIUnavailable as e:
+        raise HTTPException(400, redact_secrets(str(e))) from e
+    except ai_analysis.AIError as e:
+        raise HTTPException(502, redact_secrets(str(e))) from e
+    c.title_options = titles
+    db.commit()
+    db.refresh(c)
+    return clip_out(c, detail=True)
 
 
 @router.post("/{clip_id}/export", status_code=201)
