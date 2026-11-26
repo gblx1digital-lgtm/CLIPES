@@ -109,53 +109,115 @@ def build_filter(layout: dict[str, Any], src_w: int, src_h: int, out_w: int = OU
 
 
 # ------------------------------------------------------------------ detecção de webcam
-def detect_webcam(frames: list) -> dict[str, Any] | None:
-    """Procura um rosto que aparece de forma estável no mesmo lugar (overlay de webcam).
+STATIC_STD = 12.0  # desvio padrão temporal (tons de cinza 0-255) abaixo do qual o pixel é "parado"
 
-    Rostos de personagens do jogo se movem; a webcam do streamer fica fixa. Exigimos o
-    mesmo local em boa parte dos quadros amostrados e um rosto pequeno em relação à tela.
-    Retorna a região estimada da webcam (normalizada) ou None.
+
+def detect_webcam(frames: list) -> dict[str, Any] | None:
+    """Acha a webcam do streamer em quadros espalhados pelo vídeo (BGR, todos do mesmo tamanho).
+
+    Critério: um rosto que aparece mais de uma vez no mesmo lugar, que se mexe, e que está cercado por
+    fundo PARADO (o quarto do streamer) dentro de um retângulo fixo. Rostos de personagens mudam de lugar;
+    logos e marcas d'água (ex.: um leão no canto) ficam soltos no meio da gameplay, que muda o tempo todo,
+    e são descartados. Retorna a região da webcam (normalizada 0-1) ou None.
     """
+    import cv2
+
+    if len(frames) < 3:
+        return None
+    grays = [cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) for f in frames]
+    return pick_webcam(grays, _face_boxes(grays))
+
+
+def _face_boxes(grays: list) -> list[tuple[float, float, float, float]]:
+    """Rostos (x, y, w, h normalizados) de todos os quadros. Detecta em 2x: rosto de webcam costuma ser pequeno."""
+    import cv2
+
+    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    H, W = grays[0].shape[:2]
+    min_side = int(W * 2 * 0.025)
+    boxes = []
+    for g in grays:
+        big = cv2.resize(cv2.equalizeHist(g), None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+        for (x, y, w, h) in cascade.detectMultiScale(big, scaleFactor=1.1, minNeighbors=5, minSize=(min_side, min_side)):
+            if w / (2 * W) > 0.25:  # rosto enorme = câmera em tela cheia, não overlay
+                continue
+            boxes.append((x / (2 * W), y / (2 * H), w / (2 * W), h / (2 * H)))
+    return boxes
+
+
+def pick_webcam(grays: list, boxes: list[tuple[float, float, float, float]]) -> dict[str, Any] | None:
+    """Escolhe, entre os rostos detectados, o que está numa webcam e mede o retângulo dela."""
     import cv2
     import numpy as np
 
-    if not frames:
+    if not boxes or len(grays) < 3:
         return None
-    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    H, W = frames[0].shape[:2]
-    boxes: list[tuple[float, float, float, float]] = []
-    for img in frames:
-        gray = cv2.equalizeHist(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
-        faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=6, minSize=(int(W * 0.03), int(W * 0.03)))
-        for (x, y, w, h) in faces:
-            if w / W > 0.25:  # rosto enorme = câmera em tela cheia, não overlay
+    H, W = grays[0].shape[:2]
+    std = np.stack(grays).astype(np.float32).std(axis=0)
+    static = (std < STATIC_STD).astype(np.uint8)
+
+    def px(x0: float, y0: float, x1: float, y1: float) -> tuple[int, int, int, int]:
+        return (int(_clamp(x0, 0, 1) * W), int(_clamp(y0, 0, 1) * H), int(_clamp(x1, 0, 1) * W), int(_clamp(y1, 0, 1) * H))
+
+    arr = np.array(boxes, dtype=np.float64)
+    centers = arr[:, :2] + arr[:, 2:] / 2
+    near = np.linalg.norm(centers[:, None, :] - centers[None, :, :], axis=2) < 0.06
+    used = np.zeros(len(arr), dtype=bool)
+    # Fecha buracos do fundo parado (a pessoa se mexe no meio do quarto) para medir o retângulo inteiro
+    k = max(3, int(W * 0.03)) | 1
+    closed = cv2.morphologyEx(static, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
+    n_lab, labels, stats, _ = cv2.connectedComponentsWithStats(closed, 8)
+
+    best: tuple[float, dict[str, Any]] | None = None
+    for i in np.argsort(-near.sum(axis=1)):
+        if used[i]:
+            continue
+        members = near[i] & ~used
+        used |= members
+        count = int(members.sum())
+        if count < 2:
+            continue
+        fx, fy, fw, fh = np.median(arr[members], axis=0).tolist()
+        fcx, fcy = fx + fw / 2, fy + fh / 2
+        # O rosto precisa se mexer (foto/avatar parado não é webcam)...
+        x0, y0, x1, y1 = px(fx, fy, fx + fw, fy + fh)
+        if x1 <= x0 or y1 <= y0 or float(std[y0:y1, x0:x1].mean()) < STATIC_STD:
+            continue
+        # ...e estar cercado de fundo parado (quarto do streamer), não de gameplay
+        rx0, ry0, rx1, ry1 = px(fcx - 1.5 * fw, fcy - 1.5 * fh, fcx + 1.5 * fw, fcy + 1.5 * fh)
+        ring = static[ry0:ry1, rx0:rx1].astype(bool)
+        ix0, iy0, ix1, iy1 = px(fcx - 0.6 * fw, fcy - 0.6 * fh, fcx + 0.6 * fw, fcy + 0.6 * fh)
+        mask = np.ones_like(ring)
+        mask[max(0, iy0 - ry0):max(0, iy1 - ry0), max(0, ix0 - rx0):max(0, ix1 - rx0)] = False
+        ring_static = float(ring[mask].mean()) if mask.any() else 0.0
+        if ring_static < 0.15:
+            continue
+
+        # Retângulo da webcam = região parada ligada ao fundo em volta do rosto
+        ids = set(np.unique(labels[ry0:ry1, rx0:rx1]).tolist()) - {0}
+        bx0, by0, bx1, by1 = x0, y0, x1, y1
+        for lab in ids:
+            sx, sy, sw, sh, area = stats[lab]
+            if area < 0.002 * W * H:
                 continue
-            boxes.append((x / W, y / H, w / W, h / H))
-    if not boxes:
-        return None
-
-    centers = np.array([[b[0] + b[2] / 2, b[1] + b[3] / 2] for b in boxes])
-    best_idx, best_count = 0, 0
-    for i, c in enumerate(centers):
-        count = int((np.linalg.norm(centers - c, axis=1) < 0.06).sum())
-        if count > best_count:
-            best_idx, best_count = i, count
-    stability = best_count / len(frames)
-    if stability < 0.4:
-        return None
-
-    near = np.linalg.norm(centers - centers[best_idx], axis=1) < 0.06
-    fx, fy, fw, fh = np.median(np.array(boxes)[near], axis=0).tolist()
-    # A webcam costuma mostrar cabeça e ombros: ~3x a largura do rosto, rosto no terço superior
-    cw, ch = min(fw * 3.4, 0.5), min(fh * 3.0, 0.6)
-    fcx, fcy = fx + fw / 2, fy + fh / 2
-    cx = _clamp(fcx - cw / 2, 0, 1 - cw)
-    cy = _clamp(fcy - ch * 0.42, 0, 1 - ch)
-    return {
-        "cam": {"x": round(cx, 4), "y": round(cy, 4), "w": round(cw, 4), "h": round(ch, 4)},
-        "face": {"x": round(fx, 4), "y": round(fy, 4), "w": round(fw, 4), "h": round(fh, 4)},
-        "stability": round(stability, 2),
-    }
+            bx0, by0, bx1, by1 = min(bx0, sx), min(by0, sy), max(bx1, sx + sw), max(by1, sy + sh)
+        rect = (float(bx0) / W, float(by0) / H, float(bx1 - bx0) / W, float(by1 - by0) / H)
+        if rect[2] * rect[3] > 0.4 or rect[2] < 1.5 * fw or rect[3] < 1.5 * fh:
+            # Região parada grande demais (tela de menu, faixas pretas) ou pequena demais: estimativa pelo rosto
+            cw, ch = min(fw * 3.4, 0.5), min(fh * 3.0, 0.6)
+            rect = (_clamp(fcx - cw / 2, 0, 1 - cw), _clamp(fcy - ch * 0.42, 0, 1 - ch), cw, ch)
+        score = count * (0.5 + ring_static)
+        if best is None or score > best[0]:
+            cx, cy, cw, ch = rect
+            cam_px_aspect = (cw * W) / max(1e-6, ch * H)
+            best = (score, {
+                "cam": {"x": round(cx, 4), "y": round(cy, 4), "w": round(cw, 4), "h": round(ch, 4)},
+                "face": {"x": round(fx, 4), "y": round(fy, 4), "w": round(fw, 4), "h": round(fh, 4)},
+                "stability": round(count / len(grays), 2),
+                # Faixa do topo com a mesma proporção da webcam: mostra a webcam inteira, sem pedaço do jogo
+                "cam_height": round(float(_clamp(OUT_W / cam_px_aspect / OUT_H, 0.22, 0.42)), 3),
+            })
+    return best[1] if best else None
 
 
 def initial_layout(creator_default: dict[str, Any] | None, detected: dict[str, Any] | None) -> dict[str, Any]:
@@ -163,5 +225,6 @@ def initial_layout(creator_default: dict[str, Any] | None, detected: dict[str, A
     if creator_default and creator_default.get("cam"):
         return normalize_layout({**creator_default, "mode": creator_default.get("mode", "split"), "cam_source": "creator_default"})
     if detected and detected.get("cam"):
-        return normalize_layout({"mode": "split", "cam": detected["cam"], "cam_source": "detected"})
+        return normalize_layout({"mode": "split", "cam": detected["cam"], "cam_height": detected.get("cam_height", 0.30),
+                                 "cam_source": "detected"})
     return normalize_layout({"mode": "full", **({k: creator_default[k] for k in ("focus_x", "zoom") if k in creator_default} if creator_default else {})})

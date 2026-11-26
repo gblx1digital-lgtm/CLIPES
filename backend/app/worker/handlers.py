@@ -335,7 +335,7 @@ def _analyze(db, job, video, src, auto, creator, ai_caller) -> str:  # noqa: ANN
     signals = SignalSummary(audio=profile, scene_changes=scenes, transcript=transcript)
 
     q.progress(db, job, 50, "Procurando webcam do streamer")
-    sample_times = [duration * (0.05 + 0.9 * i / 11) for i in range(12)]
+    sample_times = [duration * (0.03 + 0.94 * i / 23) for i in range(24)]
     detected = layout_svc.detect_webcam(media.extract_frames_gray(src, sample_times))
     video.layout_hint = detected
     db.commit()

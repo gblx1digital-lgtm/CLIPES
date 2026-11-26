@@ -2,7 +2,8 @@ import numpy as np
 
 from app.services import scoring
 from app.services.candidates import find_candidates
-from app.services.layout import build_filter, compute_regions, detect_webcam, initial_layout, normalize_layout
+from app.services.layout import (build_filter, compute_regions, detect_webcam, initial_layout, normalize_layout,
+                                 pick_webcam)
 from app.services.signals import AudioProfile, SignalSummary, robust_z
 from app.services.sources.base import matches_keywords, parse_iso8601_duration, parse_twitch_duration
 
@@ -54,6 +55,49 @@ def test_detect_webcam_none_without_faces():
     frames = [np.zeros((360, 640, 3), np.uint8) for _ in range(5)]
     assert detect_webcam(frames) is None
 
+
+
+def _webcam_scene(n=24, seed=1):
+    """Quadros 640x360: gameplay mudando o tempo todo, webcam no canto superior esquerdo (quarto parado,
+    pessoa se mexendo) e um logo no canto direito (desenho fixo meio transparente sobre a gameplay)."""
+    rng = np.random.default_rng(seed)
+    room = rng.integers(40, 200, (100, 154), dtype=np.uint8)     # quarto do streamer: textura fixa
+    logo = rng.integers(0, 255, (40, 40), dtype=np.uint8)
+    frames = []
+    for _ in range(n):
+        g = rng.integers(0, 255, (360, 640), dtype=np.uint8)     # gameplay
+        g[41:141, 0:154] = room
+        g[60:110, 55:95] = rng.integers(0, 255, (50, 40), dtype=np.uint8)  # pessoa se mexendo
+        g[210:250, 590:630] = (0.6 * logo + 0.4 * g[210:250, 590:630]).astype(np.uint8)
+        frames.append(g)
+    return frames
+
+
+def test_pick_webcam_ignores_logo_in_gameplay_and_measures_the_cam_box():
+    grays = _webcam_scene()
+    face = (60 / 640, 65 / 360, 30 / 640, 30 / 360)
+    lion = (595 / 640, 215 / 360, 30 / 640, 30 / 360)
+    det = pick_webcam(grays, [lion] * 11 + [face] * 4)  # o logo é "detectado" mais vezes que o rosto
+    assert det is not None
+    cam = det["cam"]
+    assert cam["x"] < 0.02 and abs(cam["y"] - 41 / 360) < 0.03
+    assert abs(cam["w"] - 154 / 640) < 0.03 and abs(cam["h"] - 100 / 360) < 0.03
+    # faixa do topo com a proporção da webcam (154x100 -> ~1.54): sem pedaço de gameplay ao lado
+    lay = initial_layout(None, det)
+    r = compute_regions(lay, 1920, 1080)
+    assert lay["mode"] == "split" and abs(r["cam"]["w"] / r["cam"]["h"] - (154 / 100)) < 0.05
+    assert r["cam"]["x"] + r["cam"]["w"] <= 0.25 * 1920
+
+
+def test_pick_webcam_rejects_logo_only_and_static_avatar():
+    grays = _webcam_scene()
+    lion = (595 / 640, 215 / 360, 30 / 640, 30 / 360)
+    assert pick_webcam(grays, [lion] * 12) is None
+    # "rosto" parado (foto/avatar fixo no canto) não é webcam
+    for g in grays:
+        g[60:110, 55:95] = 128
+    face = (60 / 640, 65 / 360, 30 / 640, 30 / 360)
+    assert pick_webcam(grays, [face] * 6) is None
 
 def test_candidates_find_audio_peaks():
     window = 0.5
